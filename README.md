@@ -10,8 +10,8 @@ recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 npm install github:spolly-ao/spolly-payments-js#v0.1.0
 ```
 
-(É um repositório privado da casa: instala-se pelo GitHub, com as credenciais do
-`git`.)
+O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
+pacote fica com o nome `@spolly-ao/spolly-payments`, que é o que se importa.
 
 ## Os nomes, que não mudam
 
