@@ -1,7 +1,7 @@
 {
   "name": "@spolly-ao/spolly-payments",
   "version": "0.1.0",
-  "description": "O SDK em JavaScript do Spolly Payments: a verificação da assinatura dos webhooks.",
+  "description": "O SDK em JavaScript do Spolly Payments: o cliente da API (sessões de checkout, estornos, conta) e a verificação da assinatura dos webhooks.",
   "type": "module",
   "license": "UNLICENSED",
   "private": true,
@@ -9,12 +9,20 @@
     "node": ">=22"
   },
   "exports": {
-    "./webhook": "./src/webhook.js"
+    ".": {
+      "types": "./src/index.d.ts",
+      "default": "./src/index.js"
+    },
+    "./webhook": {
+      "types": "./src/webhook.d.ts",
+      "default": "./src/webhook.js"
+    }
   },
   "files": [
     "src"
   ],
   "scripts": {
     "test": "node --test --experimental-test-coverage --test-coverage-include=src/** --test-coverage-lines=100 --test-coverage-branches=100 --test-coverage-functions=100"
-  }
+  },
+  "types": "./src/index.d.ts"
 }

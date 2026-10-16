@@ -17,6 +17,8 @@
 
 import { createHmac, timingSafeEqual } from "node:crypto";
 
+import { parseJSON } from "./json.js";
+
 export const SIGNATURE_HEADER = "Spolly-Signature";
 export const EVENT_ID_HEADER = "Spolly-Event-Id";
 export const EVENT_TYPE_HEADER = "Spolly-Event-Type";
@@ -136,7 +138,8 @@ export function verifySignature(payload, header, secrets, options = {}) {
 }
 
 /**
- * Verifica a assinatura e devolve o envelope do evento.
+ * Verifica a assinatura e devolve o envelope do evento. Os valores de dinheiro
+ * (`amount`, `unit_amount`) vêm em `bigint`, como no cliente da API.
  *
  * @param {string|Uint8Array} payload
  * @param {string|null|undefined} header
@@ -148,7 +151,7 @@ export function constructEvent(payload, header, secrets, options = {}) {
   verifySignature(payload, header, secrets, options);
   let e;
   try {
-    e = JSON.parse(bytes(payload).toString("utf8"));
+    e = parseJSON(bytes(payload).toString("utf8"));
   } catch (erro) {
     throw new WebhookVerificationError(Reasons.INVALID_PAYLOAD, String(erro.message));
   }

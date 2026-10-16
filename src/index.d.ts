@@ -1,0 +1,261 @@
+// Os tipos de ./index.js, escritos à mão para quem usa TypeScript. Seguem o
+// contratos/openapi.yaml do super projeto.
+
+export * from "./webhook.js";
+
+export declare const VERSION: string;
+export declare const DEFAULT_BASE_URL: "https://payments-api.spolly.ao";
+export declare const DEFAULT_TIMEOUT_MS: number;
+export declare const DEFAULT_MAX_RETRIES: number;
+export declare const IDEMPOTENCY_KEY_HEADER: "Idempotency-Key";
+export declare const IDEMPOTENT_REPLAYED_HEADER: "Idempotent-Replayed";
+
+/** Um valor em unidades menores inteiras, à entrada: 15.000,00 Kz é `1500000n`. */
+export type MinorUnits = bigint | number | string;
+
+export type Currency = "AOA" | "USD" | "EUR";
+export type PaymentMethod = "mcx" | "reference" | "baipaga" | "card";
+export type Mode = "test" | "live";
+
+/** Dinheiro como a API o devolve: `amount` em `bigint`, em unidades menores. */
+export interface Money {
+  amount: bigint;
+  currency: Currency;
+}
+
+export interface LineItemParams {
+  description: string;
+  unit_amount: MinorUnits;
+  quantity: number;
+}
+
+export interface LineItem {
+  description: string;
+  unit_amount: bigint;
+  quantity: number;
+}
+
+export interface CustomerParams {
+  email?: string;
+  name?: string;
+  /** Telemóvel angolano; a API guarda-o como 244XXXXXXXXX. */
+  phone?: string;
+}
+
+export interface CheckoutSessionParams {
+  /** Em unidades menores inteiras. Em AOA, múltiplo de 100. */
+  amount: MinorUnits;
+  currency: Currency;
+  /** Obrigatória sem `line_items`. */
+  description?: string;
+  line_items?: LineItemParams[];
+  /** Vazio aceita todos os que têm gateway na moeda e no modo. */
+  payment_methods?: PaymentMethod[];
+  /** O regresso não prova pagamento: confirma-se pelo webhook ou por `getCheckoutSession`. */
+  success_url?: string;
+  cancel_url?: string;
+  metadata?: Record<string, string>;
+  customer?: CustomerParams;
+  /** A vida da sessão em segundos, de 900 a 86400. 24 horas por omissão. */
+  expires_in?: number;
+  /** "payment" por omissão, ou "subscription". */
+  kind?: "payment" | "subscription";
+  /** O plano de uma sessão "subscription": obrigatório nela, e recusado nas outras. */
+  subscription?: SubscriptionPlan;
+}
+
+export type SubscriptionInterval = "week" | "month" | "quarter" | "half_year" | "year";
+
+export interface SubscriptionPlan {
+  interval: SubscriptionInterval;
+  /** Quantas vezes se cobra (até 1000). Sem ele, até alguém cancelar. */
+  cycles?: number;
+}
+
+export interface SessionSubscription {
+  /** A subscrição (sub_...), ou null numa sessão ainda por pagar. */
+  id: string | null;
+  interval: SubscriptionInterval;
+  cycles: number | null;
+  /** O ciclo que uma sessão de renovação paga; null nas outras. */
+  cycle: number | null;
+}
+
+export interface CheckoutSession {
+  id: string;
+  object: "checkout_session";
+  mode: Mode;
+  status: "open" | "complete" | "expired";
+  /** O checkout alojado, para onde se manda o comprador. */
+  url: string;
+  amount: Money;
+  description: string;
+  line_items: LineItem[];
+  payment_methods: PaymentMethod[];
+  success_url: string | null;
+  cancel_url: string | null;
+  metadata: Record<string, string>;
+  customer: { email: string; name: string; phone: string };
+  expires_at: string;
+  created_at: string;
+  completed_at: string | null;
+  payment: { id: string; status: "succeeded"; method: PaymentMethod } | null;
+  kind: "payment" | "subscription" | "renewal";
+  /** O plano e a subscrição, numa sessão de subscrição ou de renovação; null numa de pagamento. */
+  subscription: SessionSubscription | null;
+}
+
+export interface RefundParams {
+  payment_id: string;
+  /** Sem ele, estorna-se o que resta. */
+  amount?: MinorUnits;
+  reason?: string;
+}
+
+export interface Refund {
+  id: string;
+  object: "refund";
+  payment_id: string;
+  amount: Money;
+  status: "processing" | "pending" | "succeeded" | "failed";
+  reason: string;
+  failure_reason?: string;
+  created_at: string;
+}
+
+export interface Account {
+  merchant_id: string;
+  nome_comercial: string;
+  modo: Mode;
+}
+
+export interface Subscription {
+  id: string;
+  object: "subscription";
+  status: "active" | "past_due" | "cancelled" | "expired";
+  /** O preço de cada ciclo. */
+  amount: Money;
+  interval: SubscriptionInterval;
+  /** Os ciclos contratados; null renova até ser cancelada. */
+  cycles: number | null;
+  /** O ciclo em vigor. O primeiro é o 1. */
+  cycle: number;
+  current_period_start: string;
+  /** Até quando o ciclo em vigor está pago. */
+  current_period_end: string;
+  /** O método do próximo ciclo. */
+  method: PaymentMethod;
+  cancel_at_period_end: boolean;
+  cancelled_at?: string;
+  cancelled_by?: "customer" | "merchant";
+  ended_at?: string;
+  end_reason?: "requested" | "unpaid" | "completed";
+  checkout_session_id: string;
+  latest_payment_id?: string;
+  customer: { email: string; name: string; phone: string };
+  metadata: Record<string, string>;
+}
+
+export interface CancelSubscriptionParams {
+  /** true (por omissão) cancela no fim do ciclo pago; false cancela já. */
+  at_period_end?: boolean;
+}
+
+export interface SubscriptionPortalLink {
+  object: "subscription_portal";
+  subscription: string;
+  /** Abre uma vez, e expira. */
+  url: string;
+  expires_at: string;
+}
+
+export interface ClientOptions {
+  /** O endereço da API. https://payments-api.spolly.ao por omissão. */
+  baseURL?: string;
+  /** O tempo limite de cada tentativa, em milissegundos. 30000 por omissão. */
+  timeoutMs?: number;
+  /** Quantas vezes se repete um pedido que falhou por uma razão passageira. 2 por omissão. */
+  maxRetries?: number;
+  /** Outro `fetch` (um proxy, um registo). */
+  fetch?: typeof fetch;
+  /** Um nome a acrescentar ao User-Agent, por exemplo "loja/1.4". */
+  userAgent?: string;
+}
+
+export interface RequestOptions {
+  signal?: AbortSignal;
+}
+
+export interface PostOptions extends RequestOptions {
+  /** A Idempotency-Key deste POST. Sem ela, gera-se uma por chamada. */
+  idempotencyKey?: string;
+}
+
+export declare class SpollyPayments {
+  constructor(secretKey: string, options?: ClientOptions);
+  createCheckoutSession(params: CheckoutSessionParams, options?: PostOptions): Promise<CheckoutSession>;
+  getCheckoutSession(id: string, options?: RequestOptions): Promise<CheckoutSession>;
+  createRefund(params: RefundParams, options?: PostOptions): Promise<Refund>;
+  getRefund(id: string, options?: RequestOptions): Promise<Refund>;
+  getAccount(options?: RequestOptions): Promise<Account>;
+  getSubscription(id: string, options?: RequestOptions): Promise<Subscription>;
+  cancelSubscription(id: string, params?: CancelSubscriptionParams, options?: PostOptions): Promise<Subscription>;
+  createSubscriptionPortalLink(id: string, options?: PostOptions): Promise<SubscriptionPortalLink>;
+}
+
+export declare const ErrorCodes: Readonly<{
+  INVALID_REQUEST: "pedido_invalido";
+  IDEMPOTENCY_MISSING: "idempotencia_em_falta";
+  IDEMPOTENCY_INVALID: "idempotencia_invalida";
+  NO_KEY: "sem_chave";
+  INVALID_KEY: "chave_invalida";
+  SESSION_NOT_FOUND: "sessao_nao_existe";
+  PAYMENT_NOT_FOUND: "pagamento_nao_existe";
+  REFUND_NOT_FOUND: "estorno_nao_existe";
+  SUBSCRIPTION_NOT_FOUND: "subscricao_nao_existe";
+  PAYMENT_NOT_PAID: "pagamento_nao_pago";
+  PAYMENT_ALREADY_REFUNDED: "pagamento_ja_estornado";
+  SUBSCRIPTION_ENDED: "subscricao_terminada";
+  INVALID_DATA: "dados_invalidos";
+  IDEMPOTENCY_REUSED: "idempotencia_reutilizada";
+  CURRENCY_WITHOUT_GATEWAY: "moeda_sem_gateway";
+  METHOD_WITHOUT_GATEWAY: "metodo_sem_gateway";
+  REFUND_EXCEEDS_CHARGED: "estorno_acima_do_cobrado";
+  INTERNAL: "erro_interno";
+  UNAVAILABLE: "indisponivel";
+  UNREADABLE_ERROR: "resposta_ilegivel";
+}>;
+
+/** Uma recusa da API. */
+export declare class SpollyError extends Error {
+  readonly name: "SpollyError";
+  /** O estado HTTP. */
+  readonly status: number;
+  /** O código estável, para o programa decidir (um dos `ErrorCodes`, ou outro mais novo). */
+  readonly code: string;
+  /** A explicação em português, para mostrar a uma pessoa. */
+  readonly userMessage: string;
+  /** Uma mensagem por campo, no 422 `dados_invalidos`. */
+  readonly fields: Record<string, string>;
+  /** A chave com que o POST foi feito; repetir com ela é seguro. */
+  readonly idempotencyKey: string;
+}
+
+/** A API não respondeu depois de todas as tentativas. `cause` tem a falha da última. */
+export declare class SpollyConnectionError extends Error {
+  readonly name: "SpollyConnectionError";
+}
+
+/** Uma resposta de sucesso que não se conseguiu ler. */
+export declare class SpollyInvalidResponseError extends Error {
+  readonly name: "SpollyInvalidResponseError";
+}
+
+/** Lê JSON com `amount` e `unit_amount` em `bigint`, a partir do texto. */
+export declare function parseJSON(text: string): unknown;
+
+/** Uma Idempotency-Key nova (UUID v4). */
+export declare function newIdempotencyKey(): string;
+
+/** Diz se uma sessão está paga: completa, e com um pagamento confirmado. */
+export declare function isPaid(session: CheckoutSession | null | undefined): boolean;
