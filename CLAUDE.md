@@ -6,7 +6,7 @@ aqui.
 
 ## Estado
 
-O SDK é o **cartão 10.2** do `TASKS-PROGRESS.md` da raiz e do quadro no Notion.
+O estado do trabalho vive no super projeto `spolly-payments`, que liga este repositório por submódulo. Este repositório é público: aqui não se fala em cartões, em clientes, nem em caminhos de máquinas.
 
 | Ficheiro | O que é |
 |---|---|
@@ -14,7 +14,7 @@ O SDK é o **cartão 10.2** do `TASKS-PROGRESS.md` da raiz e do quadro no Notion
 | `src/json.js` | O dinheiro em JSON: `amount` e `unit_amount` leem-se para `bigint` a partir do texto (`JSON.parse` com a fonte) e escrevem-se com `JSON.rawJSON` |
 | `src/webhook.js` | A verificação dos webhooks (`constructEvent`, `verifySignature`, `sign`, `WebhookVerificationError` com `code` um dos `Reasons`), com a mesma semântica do pacote `webhook` do SDK em Go |
 | `src/index.d.ts`, `src/webhook.d.ts` | Os tipos, escritos à mão |
-| `examples/checkout.js` | O percurso inteiro contra a API e o worker: foi assim que o cartão 10.2 se verificou |
+| `examples/checkout.js` | O percurso inteiro contra a API e o worker: criar uma sessão, pagar em modo teste e verificar o webhook |
 | `examples/receber-webhooks.js` | Só o servidor que recebe e verifica |
 
 Testes em `test/` (`node:test`, 100% de linhas, ramos e funções, e o mesmo em
