@@ -6,8 +6,20 @@ aqui.
 
 ## Estado
 
-Sem código ainda. O trabalho é o **cartão 10.2** do `TASKS-PROGRESS.md` da raiz e
-do quadro no Notion, e vem depois do SDK em Go (10.1), com o mesmo contrato.
+O SDK é o **cartão 10.2** do `TASKS-PROGRESS.md` da raiz e do quadro no Notion.
+**Já existe** a verificação dos webhooks (`src/webhook.js`, exportado como
+`@spolly-ao/spolly-payments/webhook`: `constructEvent`, `verifySignature`,
+`sign`, `WebhookVerificationError` com `code` um dos `Reasons`), com a mesma
+semântica do pacote `webhook` do SDK em Go, testes em `test/` (`node:test`, 100%
+de cobertura de linhas, ramos e funções) e um servidor de exemplo em
+`examples/receber-webhooks.js`. O cliente da API (sessões, estornos) ainda não.
+
+## Comandos
+
+```bash
+node --run test                                              # testes e cobertura (falha abaixo de 100%)
+SPOLLY_WEBHOOK_SECRETS=whsec_... node examples/receber-webhooks.js 8099
+```
 
 ## Regras que valem aqui
 
