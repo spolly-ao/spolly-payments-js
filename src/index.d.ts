@@ -13,8 +13,8 @@ export declare const IDEMPOTENT_REPLAYED_HEADER: "Idempotent-Replayed";
 /** Um valor em unidades menores inteiras, à entrada: 15.000,00 Kz é `1500000n`. */
 export type MinorUnits = bigint | number | string;
 
-export type Currency = "AOA" | "USD" | "EUR";
-export type PaymentMethod = "mcx" | "reference" | "baipaga" | "card";
+export type Currency = "AOA" | "USD" | "EUR" | "BRL";
+export type PaymentMethod = "mcx" | "reference" | "baipaga" | "card" | "pix";
 export type Mode = "test" | "live";
 
 /** Dinheiro como a API o devolve: `amount` em `bigint`, em unidades menores. */
