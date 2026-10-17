@@ -47,6 +47,11 @@ export interface Event<T = Record<string, unknown>> {
   created_at: string;
   mode: "test" | "live";
   merchant_id: string;
+  /**
+   * A aplicação do comerciante de onde o evento vem (a da chave de API ou do
+   * link que criou a sessão), ou `null`. Só chega aos endpoints dessa aplicação.
+   */
+  application: string | null;
   api_version: string;
   data: { object: T };
 }

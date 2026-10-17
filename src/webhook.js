@@ -145,7 +145,7 @@ export function verifySignature(payload, header, secrets, options = {}) {
  * @param {string|null|undefined} header
  * @param {string|string[]} secrets
  * @param {{ toleranceSeconds?: number, now?: () => number }} [options]
- * @returns {{ id: string, type: string, created_at: string, mode: "test"|"live", merchant_id: string, api_version: string, data: { object: Record<string, unknown> } }}
+ * @returns {{ id: string, type: string, created_at: string, mode: "test"|"live", merchant_id: string, application: string|null, api_version: string, data: { object: Record<string, unknown> } }}
  */
 export function constructEvent(payload, header, secrets, options = {}) {
   verifySignature(payload, header, secrets, options);
