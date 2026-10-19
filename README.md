@@ -7,7 +7,7 @@ recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 `src/webhook.d.ts`).
 
 ```bash
-npm install github:spolly-ao/spolly-payments-js#v0.4.0
+npm install github:spolly-ao/spolly-payments-js#v0.5.0
 ```
 
 O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
@@ -28,7 +28,7 @@ pacote fica com o nome `@spolly-ao/spolly-payments`, que é o que se importa.
 | | `createSubscriptionPortalLink(id, { idempotencyKey, signal })` | `POST /v1/subscriptions/{id}/portal`: o link de uso único da página do cliente |
 | | `SpollyError` (`status`, `code`, `userMessage`, `fields`, `idempotencyKey`), `ErrorCodes` | As recusas da API |
 | | `SpollyConnectionError`, `SpollyInvalidResponseError` | A API não respondeu; uma resposta que não se lê |
-| | `PaymentMethods` (com `BANK_TRANSFER` e `DIRECT_DEBIT`, só em AOA e só quando pedidos por nome), `Renewals` (`AUTOMATIC`, `NOTICE`: o `renewal` da subscrição) | Os valores do contrato |
+| | `PaymentMethods` (com `BANK_TRANSFER` e `DIRECT_DEBIT`, só em AOA e só quando pedidos por nome), `Renewals` (`AUTOMATIC`, `NOTICE`: o `renewal` da subscrição), `Settlements` (`BALANCE`, `MERCHANT_ACCOUNT`: o `settlement` de um pagamento; na transferência bancária, o dinheiro entra direto na conta do comerciante, que o confirma no painel, e a taxa sai do saldo dele; uma transferência não se estorna pela API, `PAID_TO_MERCHANT_ACCOUNT`) | Os valores do contrato |
 | | `isPaid(sessao)`, `newIdempotencyKey()`, `parseJSON(texto)` | Ajudas |
 | `@spolly-ao/spolly-payments/webhook` (e reexportados na raiz) | `constructEvent`, `verifySignature`, `sign`, `WebhookVerificationError`, `Reasons`, `SIGNATURE_HEADER` | A assinatura dos webhooks |
 
@@ -110,6 +110,13 @@ const sub = await spolly.getSubscription(lida.subscription.id);
 const { url } = await spolly.createSubscriptionPortalLink(sub.id); // mandar ao cliente
 await spolly.cancelSubscription(sub.id); // no fim do ciclo pago; { at_period_end: false } termina já
 ```
+
+Um cupão que vale só no primeiro ciclo: `subscription: { interval: "month",
+first_cycle_amount: 250000n }`. O primeiro pagamento cobra-o, e as renovações
+cobram o `amount` (no cartão, o Stripe renova sozinho pelo preço cheio). Um
+cancelamento no fim do ciclo dá dois `subscription.cancelled`: o do pedido, com a
+subscrição ainda `active`, e o do fim, com `status` `cancelled`; corta-se o
+acesso pelo segundo.
 
 ## Comissão de plataforma
 

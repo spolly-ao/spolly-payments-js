@@ -31,6 +31,10 @@ export declare const PaymentMethods: Readonly<{
 /** Como renova o ciclo seguinte: sozinho (cartão, débito direto) ou por aviso com o link. */
 export type Renewal = "automatic" | "notice";
 export declare const Renewals: Readonly<{ AUTOMATIC: "automatic"; NOTICE: "notice" }>;
+
+/** Para onde foi o dinheiro de um pagamento: o saldo, ou a conta bancária do comerciante (a transferência). */
+export type Settlement = "balance" | "merchant_account";
+export declare const Settlements: Readonly<{ BALANCE: "balance"; MERCHANT_ACCOUNT: "merchant_account" }>;
 export type Mode = "test" | "live";
 
 /** Dinheiro como a API o devolve: `amount` em `bigint`, em unidades menores. */
@@ -108,8 +112,13 @@ export interface Payment {
   amount: Money;
   /** A taxa do Spolly Payments. */
   fee: Money;
-  /** O que fica ao comerciante: `amount` menos `fee` e menos a comissão da plataforma, quando a há. */
+  /**
+   * O que fica ao comerciante: `amount` menos `fee` e menos a comissão da plataforma, quando a há.
+   * Com `settlement` `merchant_account`, o `amount` entrou na conta bancária dele e a `fee` sai do saldo.
+   */
   net: Money;
+  /** Para onde foi o dinheiro. */
+  settlement: Settlement;
   method: PaymentMethod;
   failure_reason?: string;
   created_at: string;
@@ -127,6 +136,12 @@ export interface SubscriptionPlan {
   interval: SubscriptionInterval;
   /** Quantas vezes se cobra (até 1000). Sem ele, até alguém cancelar. */
   cycles?: number;
+  /**
+   * O valor do primeiro ciclo, quando é mais barato do que o `amount` da sessão
+   * (um cupão que vale só no primeiro mês): o primeiro pagamento cobra-o, e as
+   * renovações cobram o `amount`. Em AOA, múltiplo de 100.
+   */
+  first_cycle_amount?: MinorUnits;
 }
 
 export interface SessionSubscription {
@@ -136,6 +151,8 @@ export interface SessionSubscription {
   cycles: number | null;
   /** O ciclo que uma sessão de renovação paga; null nas outras. */
   cycle: number | null;
+  /** O valor do primeiro ciclo, quando é mais barato do que o `amount`, ou null. */
+  first_cycle_amount: bigint | null;
 }
 
 export interface CheckoutSession {
@@ -194,8 +211,10 @@ export interface Subscription {
   id: string;
   object: "subscription";
   status: "active" | "past_due" | "cancelled" | "expired";
-  /** O preço de cada ciclo. */
+  /** O preço de cada ciclo; as renovações cobram-no sempre. */
   amount: Money;
+  /** O que o primeiro ciclo custou, quando foi mais barato do que `amount`, ou null. */
+  first_cycle_amount: Money | null;
   interval: SubscriptionInterval;
   /** Os ciclos contratados; null renova até ser cancelada. */
   cycles: number | null;
@@ -278,6 +297,7 @@ export declare const ErrorCodes: Readonly<{
   SUBSCRIPTION_NOT_FOUND: "subscricao_nao_existe";
   PAYMENT_NOT_PAID: "pagamento_nao_pago";
   PAYMENT_ALREADY_REFUNDED: "pagamento_ja_estornado";
+  PAID_TO_MERCHANT_ACCOUNT: "pago_na_conta_do_comerciante";
   SUBSCRIPTION_ENDED: "subscricao_terminada";
   INVALID_DATA: "dados_invalidos";
   IDEMPOTENCY_REUSED: "idempotencia_reutilizada";

@@ -26,7 +26,7 @@ export { parseJSON } from "./json.js";
 export { constructEvent, verifySignature, sign, WebhookVerificationError, Reasons, SIGNATURE_HEADER, EVENT_ID_HEADER, EVENT_TYPE_HEADER, DEFAULT_TOLERANCE_SECONDS } from "./webhook.js";
 
 /** A versão deste SDK, que vai no User-Agent. */
-export const VERSION = "0.4.0";
+export const VERSION = "0.5.0";
 
 /** A API de produção. As chaves sk_test_ também a usam: o modo é o da chave. */
 export const DEFAULT_BASE_URL = "https://payments-api.spolly.ao";
@@ -64,6 +64,17 @@ export const Renewals = Object.freeze({
   NOTICE: "notice",
 });
 
+/**
+ * Para onde foi o dinheiro de um pagamento (o `settlement` do objeto `payment`
+ * dos eventos): `balance`, o saldo do comerciante no Spolly Payments;
+ * `merchant_account`, a conta bancária do comerciante (a transferência
+ * bancária, que ele confirma no painel; a taxa sai do saldo dele).
+ */
+export const Settlements = Object.freeze({
+  BALANCE: "balance",
+  MERCHANT_ACCOUNT: "merchant_account",
+});
+
 /** Os códigos de erro da API (o campo `erro` do corpo), estáveis. */
 export const ErrorCodes = Object.freeze({
   INVALID_REQUEST: "pedido_invalido",
@@ -77,6 +88,8 @@ export const ErrorCodes = Object.freeze({
   SUBSCRIPTION_NOT_FOUND: "subscricao_nao_existe",
   PAYMENT_NOT_PAID: "pagamento_nao_pago",
   PAYMENT_ALREADY_REFUNDED: "pagamento_ja_estornado",
+  /** O pagamento foi uma transferência direta para a conta do comerciante: não se estorna pela API (409). */
+  PAID_TO_MERCHANT_ACCOUNT: "pago_na_conta_do_comerciante",
   SUBSCRIPTION_ENDED: "subscricao_terminada",
   INVALID_DATA: "dados_invalidos",
   IDEMPOTENCY_REUSED: "idempotencia_reutilizada",
@@ -87,7 +100,7 @@ export const ErrorCodes = Object.freeze({
   PLATFORM_NOT_AUTHORIZED: "plataforma_nao_autorizada",
   /** A comissão da plataforma passa o máximo que o comerciante autorizou (422). */
   PLATFORM_FEE_ABOVE_MAXIMUM: "comissao_acima_do_maximo",
-  /** A comissão é zero, negativa, da própria plataforma, ou deixava o comerciante sem líquido (422). */
+  /** A comissão é zero, negativa, da própria plataforma, deixava o comerciante sem líquido, ou vinha com `bank_transfer` (422). */
   PLATFORM_FEE_INVALID: "comissao_invalida",
   INTERNAL: "erro_interno",
   UNAVAILABLE: "indisponivel",

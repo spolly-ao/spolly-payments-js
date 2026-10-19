@@ -18,6 +18,7 @@ import {
   VERSION,
   PaymentMethods,
   Renewals,
+  Settlements,
 } from "../src/index.js";
 
 const SESSAO = `{"id":"cs_test_4f8Gk2LmQ9rT1vXz7bN3cH6sW0pY5aDe","object":"checkout_session","mode":"test","status":"complete",
@@ -127,6 +128,26 @@ test("a comissão da plataforma viaja em bigint, e as recusas têm o seu código
   assert.equal(ErrorCodes.PLATFORM_NOT_AUTHORIZED, "plataforma_nao_autorizada");
   assert.equal(ErrorCodes.PLATFORM_FEE_ABOVE_MAXIMUM, "comissao_acima_do_maximo");
   assert.equal(ErrorCodes.PLATFORM_FEE_INVALID, "comissao_invalida");
+});
+
+test("o primeiro ciclo de uma subscrição viaja em bigint, nos dois sentidos", async () => {
+  responder = () => [201, {}, SESSAO.replace('"payment":{', '"subscription":{"id":null,"interval":"month","cycles":null,"cycle":null,"first_cycle_amount":250000},"payment":{')];
+  const c = cliente();
+  const s = await c.createCheckoutSession({
+    amount: 500000n,
+    currency: "AOA",
+    description: "Plano mensal",
+    kind: "subscription",
+    subscription: { interval: "month", first_cycle_amount: 250000n },
+  });
+  assert.equal(s.subscription.first_cycle_amount, 250000n);
+  assert.equal(
+    pedidos[0].corpo,
+    `{"amount":500000,"currency":"AOA","description":"Plano mensal","kind":"subscription","subscription":{"interval":"month","first_cycle_amount":250000}}`,
+  );
+  // Na subscrição, é dinheiro com a moeda, e o valor lá dentro é bigint.
+  const sub = parseJSON(`{"amount":{"amount":500000,"currency":"AOA"},"first_cycle_amount":{"amount":250000,"currency":"AOA"}}`);
+  assert.deepEqual(sub.first_cycle_amount, { amount: 250000n, currency: "AOA" });
 });
 
 test("o dinheiro grande viaja inteiro, nos dois sentidos", async () => {
@@ -390,6 +411,10 @@ test("as subscrições", async () => {
   assert.equal(s.cycles, null);
   assert.equal(s.renewal, Renewals.NOTICE);
   assert.equal(Renewals.AUTOMATIC, "automatic");
+  assert.equal(Settlements.MERCHANT_ACCOUNT, "merchant_account");
+  assert.equal(Settlements.BALANCE, "balance");
+  assert.ok(Object.isFrozen(Settlements));
+  assert.equal(ErrorCodes.PAID_TO_MERCHANT_ACCOUNT, "pago_na_conta_do_comerciante");
   assert.equal(PaymentMethods.BANK_TRANSFER, "bank_transfer");
   assert.equal(PaymentMethods.DIRECT_DEBIT, "direct_debit");
   await c.cancelSubscription("sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0");
