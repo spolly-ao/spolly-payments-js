@@ -14,7 +14,23 @@ export declare const IDEMPOTENT_REPLAYED_HEADER: "Idempotent-Replayed";
 export type MinorUnits = bigint | number | string;
 
 export type Currency = "AOA" | "USD" | "EUR" | "BRL";
-export type PaymentMethod = "mcx" | "reference" | "baipaga" | "card" | "pix";
+/**
+ * Os métodos de pagamento. `bank_transfer` e `direct_debit` existem só em AOA,
+ * e só se oferecem quando a sessão os pede por nome em `payment_methods`.
+ */
+export type PaymentMethod = "mcx" | "reference" | "baipaga" | "card" | "pix" | "bank_transfer" | "direct_debit";
+export declare const PaymentMethods: Readonly<{
+  MCX: "mcx";
+  REFERENCE: "reference";
+  BAIPAGA: "baipaga";
+  CARD: "card";
+  PIX: "pix";
+  BANK_TRANSFER: "bank_transfer";
+  DIRECT_DEBIT: "direct_debit";
+}>;
+/** Como renova o ciclo seguinte: sozinho (cartão, débito direto) ou por aviso com o link. */
+export type Renewal = "automatic" | "notice";
+export declare const Renewals: Readonly<{ AUTOMATIC: "automatic"; NOTICE: "notice" }>;
 export type Mode = "test" | "live";
 
 /** Dinheiro como a API o devolve: `amount` em `bigint`, em unidades menores. */
@@ -62,6 +78,47 @@ export interface CheckoutSessionParams {
   kind?: "payment" | "subscription";
   /** O plano de uma sessão "subscription": obrigatório nela, e recusado nas outras. */
   subscription?: SubscriptionPlan;
+  /**
+   * A comissão de uma plataforma que vende em nome do comerciante da chave: o
+   * comerciante tem de a ter autorizado no painel, e o valor nunca passa o
+   * máximo dele. Numa sessão "subscription", repete-se em cada renovação.
+   */
+  platform_fee?: PlatformFeeParams;
+}
+
+export interface PlatformFeeParams {
+  /** O identificador de comerciante da plataforma (mer_...). */
+  platform: string;
+  /** Em unidades menores da moeda da sessão (em AOA, múltiplo de 100). */
+  amount: MinorUnits;
+}
+
+/** A comissão de uma plataforma, como a API a devolve. */
+export interface PlatformFee {
+  platform: string;
+  amount: bigint;
+}
+
+/** O objeto de um pagamento nos eventos `payment.succeeded` e `payment.failed`. */
+export interface Payment {
+  id: string;
+  object: "payment";
+  checkout_session_id: string;
+  status: "succeeded" | "failed";
+  amount: Money;
+  /** A taxa do Spolly Payments. */
+  fee: Money;
+  /** O que fica ao comerciante: `amount` menos `fee` e menos a comissão da plataforma, quando a há. */
+  net: Money;
+  method: PaymentMethod;
+  failure_reason?: string;
+  created_at: string;
+  metadata: Record<string, string>;
+  paid_after_expiry?: true;
+  /** A comissão que a plataforma recebeu neste pagamento, ou null. */
+  platform_fee: PlatformFee | null;
+  /** Porque uma comissão pedida não se aplicou: o pagamento entrou sem ela. */
+  platform_fee_skipped?: "authorization_revoked" | "above_maximum" | "exceeds_net";
 }
 
 export type SubscriptionInterval = "week" | "month" | "quarter" | "half_year" | "year";
@@ -103,6 +160,10 @@ export interface CheckoutSession {
   kind: "payment" | "subscription" | "renewal";
   /** O plano e a subscrição, numa sessão de subscrição ou de renovação; null numa de pagamento. */
   subscription: SessionSubscription | null;
+  /** A aplicação do comerciante de onde a sessão vem (app_...), ou null. Os eventos dela levam-na em `application`. */
+  application: string | null;
+  /** A comissão da plataforma que a sessão pede, ou null. */
+  platform_fee: PlatformFee | null;
 }
 
 export interface RefundParams {
@@ -145,6 +206,8 @@ export interface Subscription {
   current_period_end: string;
   /** O método do próximo ciclo. */
   method: PaymentMethod;
+  /** Como renova o ciclo seguinte: `automatic` (cartão, débito direto) ou `notice` (aviso com o link). */
+  renewal: Renewal;
   cancel_at_period_end: boolean;
   cancelled_at?: string;
   cancelled_by?: "customer" | "merchant";
@@ -221,6 +284,9 @@ export declare const ErrorCodes: Readonly<{
   CURRENCY_WITHOUT_GATEWAY: "moeda_sem_gateway";
   METHOD_WITHOUT_GATEWAY: "metodo_sem_gateway";
   REFUND_EXCEEDS_CHARGED: "estorno_acima_do_cobrado";
+  PLATFORM_NOT_AUTHORIZED: "plataforma_nao_autorizada";
+  PLATFORM_FEE_ABOVE_MAXIMUM: "comissao_acima_do_maximo";
+  PLATFORM_FEE_INVALID: "comissao_invalida";
   INTERNAL: "erro_interno";
   UNAVAILABLE: "indisponivel";
   UNREADABLE_ERROR: "resposta_ilegivel";

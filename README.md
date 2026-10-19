@@ -7,7 +7,7 @@ recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 `src/webhook.d.ts`).
 
 ```bash
-npm install github:spolly-ao/spolly-payments-js#v0.3.0
+npm install github:spolly-ao/spolly-payments-js#v0.4.0
 ```
 
 O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
@@ -28,6 +28,7 @@ pacote fica com o nome `@spolly-ao/spolly-payments`, que é o que se importa.
 | | `createSubscriptionPortalLink(id, { idempotencyKey, signal })` | `POST /v1/subscriptions/{id}/portal`: o link de uso único da página do cliente |
 | | `SpollyError` (`status`, `code`, `userMessage`, `fields`, `idempotencyKey`), `ErrorCodes` | As recusas da API |
 | | `SpollyConnectionError`, `SpollyInvalidResponseError` | A API não respondeu; uma resposta que não se lê |
+| | `PaymentMethods` (com `BANK_TRANSFER` e `DIRECT_DEBIT`, só em AOA e só quando pedidos por nome), `Renewals` (`AUTOMATIC`, `NOTICE`: o `renewal` da subscrição) | Os valores do contrato |
 | | `isPaid(sessao)`, `newIdempotencyKey()`, `parseJSON(texto)` | Ajudas |
 | `@spolly-ao/spolly-payments/webhook` (e reexportados na raiz) | `constructEvent`, `verifySignature`, `sign`, `WebhookVerificationError`, `Reasons`, `SIGNATURE_HEADER` | A assinatura dos webhooks |
 
@@ -108,6 +109,24 @@ await spolly.createCheckoutSession({
 const sub = await spolly.getSubscription(lida.subscription.id);
 const { url } = await spolly.createSubscriptionPortalLink(sub.id); // mandar ao cliente
 await spolly.cancelSubscription(sub.id); // no fim do ciclo pago; { at_period_end: false } termina já
+```
+
+## Comissão de plataforma
+
+Uma plataforma que vende em nome de um comerciante cria a sessão com a chave
+dele e fica com uma comissão no próprio pagamento. O comerciante tem de a ter
+autorizado no painel, com um máximo.
+
+```js
+const hotel = new SpollyPayments(process.env.CHAVE_DO_HOTEL);
+const sessao = await hotel.createCheckoutSession({
+  amount: 1500000n, currency: "AOA", description: "Duas noites",
+  platform_fee: { platform: "mer_38IAs7qmknSwC1F9XYtR1b", amount: 150000n },
+});
+// Recusas: ErrorCodes.PLATFORM_NOT_AUTHORIZED (403),
+// PLATFORM_FEE_ABOVE_MAXIMUM e PLATFORM_FEE_INVALID (422).
+// No payment.succeeded, data.object.platform_fee diz o que a plataforma
+// recebeu, e o net é o que fica ao comerciante.
 ```
 
 ## O que o cliente faz sozinho

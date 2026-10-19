@@ -26,7 +26,7 @@ export { parseJSON } from "./json.js";
 export { constructEvent, verifySignature, sign, WebhookVerificationError, Reasons, SIGNATURE_HEADER, EVENT_ID_HEADER, EVENT_TYPE_HEADER, DEFAULT_TOLERANCE_SECONDS } from "./webhook.js";
 
 /** A versão deste SDK, que vai no User-Agent. */
-export const VERSION = "0.3.0";
+export const VERSION = "0.4.0";
 
 /** A API de produção. As chaves sk_test_ também a usam: o modo é o da chave. */
 export const DEFAULT_BASE_URL = "https://payments-api.spolly.ao";
@@ -39,6 +39,30 @@ const ESPERA_BASE_MS = 500;
 const ESPERA_MAXIMA_MS = 8_000;
 const RETRY_AFTER_MAXIMO_MS = 30_000;
 const REPETIVEIS = new Set([429, 500, 502, 503, 504]);
+
+/**
+ * Os métodos de pagamento. A transferência bancária e o débito direto existem
+ * só em AOA, e só se oferecem quando a sessão os pede por nome em
+ * `payment_methods`: uma lista vazia não os inclui.
+ */
+export const PaymentMethods = Object.freeze({
+  MCX: "mcx",
+  REFERENCE: "reference",
+  BAIPAGA: "baipaga",
+  CARD: "card",
+  PIX: "pix",
+  BANK_TRANSFER: "bank_transfer",
+  DIRECT_DEBIT: "direct_debit",
+});
+
+/**
+ * Como renova o ciclo seguinte de uma subscrição: `automatic` cobra-se sozinho
+ * (o cartão e o débito direto); `notice` manda o aviso com o link do ciclo.
+ */
+export const Renewals = Object.freeze({
+  AUTOMATIC: "automatic",
+  NOTICE: "notice",
+});
 
 /** Os códigos de erro da API (o campo `erro` do corpo), estáveis. */
 export const ErrorCodes = Object.freeze({
@@ -59,6 +83,12 @@ export const ErrorCodes = Object.freeze({
   CURRENCY_WITHOUT_GATEWAY: "moeda_sem_gateway",
   METHOD_WITHOUT_GATEWAY: "metodo_sem_gateway",
   REFUND_EXCEEDS_CHARGED: "estorno_acima_do_cobrado",
+  /** A sessão pede `platform_fee`, e o comerciante da chave não autorizou essa plataforma (403). */
+  PLATFORM_NOT_AUTHORIZED: "plataforma_nao_autorizada",
+  /** A comissão da plataforma passa o máximo que o comerciante autorizou (422). */
+  PLATFORM_FEE_ABOVE_MAXIMUM: "comissao_acima_do_maximo",
+  /** A comissão é zero, negativa, da própria plataforma, ou deixava o comerciante sem líquido (422). */
+  PLATFORM_FEE_INVALID: "comissao_invalida",
   INTERNAL: "erro_interno",
   UNAVAILABLE: "indisponivel",
   /** Posto pelo SDK: a API respondeu com um erro cujo corpo não se lê. */

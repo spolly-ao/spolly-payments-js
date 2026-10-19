@@ -16,6 +16,8 @@ import {
   SpollyInvalidResponseError,
   SpollyPayments,
   VERSION,
+  PaymentMethods,
+  Renewals,
 } from "../src/index.js";
 
 const SESSAO = `{"id":"cs_test_4f8Gk2LmQ9rT1vXz7bN3cH6sW0pY5aDe","object":"checkout_session","mode":"test","status":"complete",
@@ -94,6 +96,37 @@ test("criar uma sessão manda o pedido certo, com a chave gerada e o dinheiro se
     p.corpo,
     `{"amount":1500000,"currency":"AOA","description":"Vestido de capulana","line_items":[{"description":"Vestido","unit_amount":1500000,"quantity":1}],"payment_methods":["mcx","card"],"metadata":{"order_id":"1042"}}`,
   );
+});
+
+test("a comissão da plataforma viaja em bigint, e as recusas têm o seu código", async () => {
+  responder = () => [201, {}, SESSAO.replace('"payment":{', '"application":"app_7Kq2Lm4Rt8Vx1Zb6Nc3Kd0","platform_fee":{"platform":"mer_38IAs7qmknSwC1F9XYtR1b","amount":150000},"payment":{')];
+  const c = cliente();
+  const s = await c.createCheckoutSession({
+    amount: 1500000n,
+    currency: "AOA",
+    description: "Duas noites",
+    platform_fee: { platform: "mer_38IAs7qmknSwC1F9XYtR1b", amount: 150000n },
+  });
+  assert.deepEqual(s.platform_fee, { platform: "mer_38IAs7qmknSwC1F9XYtR1b", amount: 150000n });
+  assert.equal(s.application, "app_7Kq2Lm4Rt8Vx1Zb6Nc3Kd0");
+  assert.equal(
+    pedidos[0].corpo,
+    `{"amount":1500000,"currency":"AOA","description":"Duas noites","platform_fee":{"platform":"mer_38IAs7qmknSwC1F9XYtR1b","amount":150000}}`,
+  );
+  for (const [estado, codigo] of [
+    [403, ErrorCodes.PLATFORM_NOT_AUTHORIZED],
+    [422, ErrorCodes.PLATFORM_FEE_ABOVE_MAXIMUM],
+    [422, ErrorCodes.PLATFORM_FEE_INVALID],
+  ]) {
+    responder = () => [estado, {}, JSON.stringify({ erro: codigo, mensagem: "recusada" })];
+    await assert.rejects(
+      c.createCheckoutSession({ amount: 1500000n, currency: "AOA", description: "x", platform_fee: { platform: "mer_x", amount: 1n } }),
+      (e) => e instanceof SpollyError && e.status === estado && e.code === codigo,
+    );
+  }
+  assert.equal(ErrorCodes.PLATFORM_NOT_AUTHORIZED, "plataforma_nao_autorizada");
+  assert.equal(ErrorCodes.PLATFORM_FEE_ABOVE_MAXIMUM, "comissao_acima_do_maximo");
+  assert.equal(ErrorCodes.PLATFORM_FEE_INVALID, "comissao_invalida");
 });
 
 test("o dinheiro grande viaja inteiro, nos dois sentidos", async () => {
@@ -343,7 +376,7 @@ test("cancelado entre a resposta e a espera: não espera, nem tenta outra vez", 
 
 const SUBSCRICAO = `{"id":"sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0","object":"subscription","status":"active","amount":{"amount":500000,"currency":"AOA"},
 "interval":"month","cycles":null,"cycle":2,"current_period_start":"2026-11-29T10:15:00Z","current_period_end":"2026-12-29T10:15:00Z",
-"method":"mcx","cancel_at_period_end":true,"checkout_session_id":"cs_test_1","customer":{"email":"","name":"","phone":""},"metadata":{}}`;
+"method":"mcx","renewal":"notice","cancel_at_period_end":true,"checkout_session_id":"cs_test_1","customer":{"email":"","name":"","phone":""},"metadata":{}}`;
 
 test("as subscrições", async () => {
   responder = (_, p) =>
@@ -355,6 +388,10 @@ test("as subscrições", async () => {
   assert.equal(s.status, "active");
   assert.equal(s.amount.amount, 500000n);
   assert.equal(s.cycles, null);
+  assert.equal(s.renewal, Renewals.NOTICE);
+  assert.equal(Renewals.AUTOMATIC, "automatic");
+  assert.equal(PaymentMethods.BANK_TRANSFER, "bank_transfer");
+  assert.equal(PaymentMethods.DIRECT_DEBIT, "direct_debit");
   await c.cancelSubscription("sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0");
   await c.cancelSubscription("sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0", { at_period_end: false }, { idempotencyKey: "cancelar-1" });
   const l = await c.createSubscriptionPortalLink("sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0");
