@@ -7,7 +7,7 @@ recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 `src/webhook.d.ts`).
 
 ```bash
-npm install github:spolly-ao/spolly-payments-js#v0.5.0
+npm install github:spolly-ao/spolly-payments-js#v0.6.0
 ```
 
 O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
