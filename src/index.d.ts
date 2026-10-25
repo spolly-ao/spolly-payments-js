@@ -128,6 +128,11 @@ export interface Payment {
   platform_fee: PlatformFee | null;
   /** Porque uma comissão pedida não se aplicou: o pagamento entrou sem ela. */
   platform_fee_skipped?: "authorization_revoked" | "above_maximum" | "exceeds_net";
+  /**
+   * A parte do `amount` que o comprador pagou por cima, quando o comerciante lhe passa a taxa
+   * (no painel, em Aplicações): é igual à `fee`, e o `net` é o valor da cobrança. null quando a taxa sai do valor.
+   */
+  fee_on_top: Money | null;
 }
 
 export type SubscriptionInterval = "week" | "month" | "quarter" | "half_year" | "year";
@@ -173,7 +178,8 @@ export interface CheckoutSession {
   expires_at: string;
   created_at: string;
   completed_at: string | null;
-  payment: { id: string; status: "succeeded"; method: PaymentMethod } | null;
+  /** O pagamento que completou a sessão: o `amount` que o comprador pagou, e a parte que foi a taxa por cima, ou null. */
+  payment: { id: string; status: "succeeded"; method: PaymentMethod; amount: Money; fee_on_top: Money | null } | null;
   kind: "payment" | "subscription" | "renewal";
   /** O plano e a subscrição, numa sessão de subscrição ou de renovação; null numa de pagamento. */
   subscription: SessionSubscription | null;
@@ -181,6 +187,11 @@ export interface CheckoutSession {
   application: string | null;
   /** A comissão da plataforma que a sessão pede, ou null. */
   platform_fee: PlatformFee | null;
+  /**
+   * O comprador paga a taxa do Spolly Payments por cima do `amount`: a escolha da aplicação da chave,
+   * ou a global do comerciante, congelada quando a sessão nasceu. O comerciante fica com o `amount`.
+   */
+  fee_on_top: boolean;
 }
 
 export interface RefundParams {
