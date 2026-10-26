@@ -1,10 +1,11 @@
-// O dinheiro em JSON sem passar por um number: os campos amount, unit_amount e
-// first_cycle_amount (o primeiro ciclo de uma subscrição) leem-se para bigint a
-// partir do texto da resposta, e escrevem-se tal como são (regra o-dinheiro.md).
-// Na subscrição, first_cycle_amount é um objeto {amount, currency}, e fica como
-// objeto: só os números passam a bigint.
+// O dinheiro em JSON sem passar por um number: os campos amount, unit_amount,
+// first_cycle_amount (o primeiro ciclo de uma subscrição) e amount_off (o valor
+// fixo de um cupão) leem-se para bigint a partir do texto da resposta, e
+// escrevem-se tal como são (regra o-dinheiro.md). Na subscrição,
+// first_cycle_amount é um objeto {amount, currency}, e no cupão amount_off
+// também: ficam como objeto, e só os números passam a bigint.
 
-const CAMPOS_DE_DINHEIRO = new Set(["amount", "unit_amount", "first_cycle_amount"]);
+const CAMPOS_DE_DINHEIRO = new Set(["amount", "unit_amount", "first_cycle_amount", "amount_off"]);
 
 /** Lê JSON com os valores de dinheiro em `bigint`, a partir do texto. */
 export function parseJSON(texto) {

@@ -31,7 +31,7 @@ export { parseJSON } from "./json.js";
 export { constructEvent, verifySignature, sign, WebhookVerificationError, Reasons, SIGNATURE_HEADER, EVENT_ID_HEADER, EVENT_TYPE_HEADER, DEFAULT_TOLERANCE_SECONDS } from "./webhook.js";
 
 /** A versão deste SDK, que vai no User-Agent. */
-export const VERSION = "0.8.0";
+export const VERSION = "0.9.0";
 
 /** A API de produção. As chaves sk_test_ também a usam: o modo é o da chave. */
 export const DEFAULT_BASE_URL = "https://payments-api.spolly.ao";
@@ -143,6 +143,12 @@ export const ErrorCodes = Object.freeze({
   INSUFFICIENT_BALANCE: "saldo_insuficiente",
   /** O saque não pode ser feito (403). */
   PAYOUT_REFUSED: "saque_recusado",
+  /** O cupão não existe neste comerciante e neste modo (404). */
+  COUPON_NOT_FOUND: "cupao_nao_existe",
+  /** Já há um cupão com este código, neste modo (409). */
+  COUPON_CODE_TAKEN: "codigo_repetido",
+  /** O `coupon` da sessão não existe, está desativado, expirado ou esgotado, é de outra moeda, ou não desconta neste valor (422). */
+  COUPON_INVALID: "cupao_invalido",
   INTERNAL: "erro_interno",
   UNAVAILABLE: "indisponivel",
   /** Posto pelo SDK: a API respondeu com um erro cujo corpo não se lê. */
@@ -211,12 +217,16 @@ const valido = {
   saldo: (o) =>
     o?.object === "balance" && typeof o.account === "string" && ["available", "pending", "reserved"].every((k) => Array.isArray(o[k]) && o[k].every((d) => typeof d?.amount === "bigint")),
   saque: (o) => typeof o?.id === "string" && o.id.startsWith("po_") && o.object === "payout",
+  cupao: (o) => typeof o?.id === "string" && o.id.startsWith("cpn_") && o.object === "coupon",
 };
 
 // Uma lista da API ({object: "list", data, has_more}), com cada item conferido.
 const lista = (item) => (o) => o?.object === "list" && Array.isArray(o.data) && typeof o.has_more === "boolean" && o.data.every(item);
 const contasLigadas = lista(valido.contaLigada);
 const saques = lista(valido.saque);
+const cupoes = lista(valido.cupao);
+
+const caminhoDoCupao = (id) => `/v1/coupons/${encodeURIComponent(id)}`;
 
 const caminhoDaConta = (id) => `/v1/accounts/${encodeURIComponent(id)}`;
 
@@ -306,6 +316,53 @@ export class SpollyPayments {
    */
   getRefund(id, options) {
     return this.#pedir("GET", `/v1/refunds/${encodeURIComponent(id)}`, undefined, valido.estorno, options);
+  }
+
+  /**
+   * Cria um cupão (POST /v1/coupons): de percentagem (`percent_off`) ou de
+   * valor fixo (`amount_off` com `currency`), e numa subscrição `once`,
+   * `repeating` (com `duration_cycles`) ou `forever`. O desconto não muda
+   * depois de criado.
+   * @param {object} params
+   * @param {{ idempotencyKey?: string, signal?: AbortSignal }} [options]
+   */
+  createCoupon(params, options) {
+    return this.#pedir("POST", "/v1/coupons", params, valido.cupao, options);
+  }
+
+  /**
+   * Lista os cupões (GET /v1/coupons), do mais recente para o mais antigo.
+   * @param {{ limit?: number, starting_after?: string, code?: string }} [params]
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  listCoupons(params = {}, options) {
+    const q = new URLSearchParams();
+    for (const k of ["limit", "starting_after", "code"]) {
+      if (params[k] !== undefined && params[k] !== null) q.set(k, String(params[k]));
+    }
+    const texto = q.toString();
+    return this.#pedir("GET", `/v1/coupons${texto ? `?${texto}` : ""}`, undefined, cupoes, options);
+  }
+
+  /**
+   * Lê um cupão (GET /v1/coupons/{id}).
+   * @param {string} id
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  getCoupon(id, options) {
+    return this.#pedir("GET", caminhoDoCupao(id), undefined, valido.cupao, options);
+  }
+
+  /**
+   * Muda o nome, o limite, a data de fim, o ativo ou os metadados de um cupão
+   * (PATCH /v1/coupons/{id}). `null` em `max_redemptions` ou `expires_at` tira
+   * o limite ou a data.
+   * @param {string} id
+   * @param {object} params
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  updateCoupon(id, params, options) {
+    return this.#pedir("PATCH", caminhoDoCupao(id), params ?? {}, valido.cupao, options);
   }
 
   /**

@@ -90,6 +90,108 @@ export interface CheckoutSessionParams {
    * máximo dele. Numa sessão "subscription", repete-se em cada renovação.
    */
   platform_fee?: PlatformFeeParams;
+  /**
+   * O código (ou o cpn_...) de um cupão a aplicar já. Um que não se aplica é
+   * `cupao_invalido` (422). Não vai com `allow_promotion_codes`, nem com o
+   * `first_cycle_amount` de uma subscrição.
+   */
+  coupon?: string;
+  /** O comprador pode escrever um código de desconto no checkout. */
+  allow_promotion_codes?: boolean;
+}
+
+export type CouponDuration = "once" | "repeating" | "forever";
+
+/** O cupão como estava quando se aplicou a uma sessão ou a um pagamento. */
+export interface SessionCoupon {
+  id: string;
+  code: string;
+  name: string;
+  percent_off: number | null;
+  amount_off: Money | null;
+  duration: CouponDuration;
+  duration_cycles: number | null;
+}
+
+/**
+ * O desconto de um cupão: o cupão e quanto desconta. Numa sessão, o `amount`
+ * dela é o preço antes do desconto; o `amount` de um pagamento é já o valor
+ * depois dele, e a taxa é sobre esse.
+ */
+export interface Discount {
+  coupon: SessionCoupon;
+  amount: Money;
+}
+
+/**
+ * O cupão de uma subscrição: o ciclo n paga `amount` menos `discount.amount`
+ * enquanto n for menor ou igual a `cycles`; `cycles` null quer dizer todos.
+ */
+export interface SubscriptionDiscount {
+  coupon: { id: string; code: string };
+  amount: Money;
+  cycles: number | null;
+}
+
+export interface CouponParams {
+  /** Letras, números, - e _, de 3 a 40; guarda-se em maiúsculas, único por comerciante e modo. */
+  code: string;
+  name?: string;
+  /** De 1 a 99. Ou isto, ou `amount_off` com `currency`. */
+  percent_off?: number;
+  /** Em unidades menores. Em AOA, múltiplo de 100. Só vale na `currency`. */
+  amount_off?: MinorUnits;
+  currency?: Currency;
+  /** Numa subscrição: o primeiro ciclo, os primeiros `duration_cycles`, ou todos. */
+  duration: CouponDuration;
+  /** Obrigatório no `repeating`, e só nele: de 2 a 1000. */
+  duration_cycles?: number;
+  max_redemptions?: number;
+  /** No futuro. */
+  expires_at?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface CouponUpdateParams {
+  name?: string;
+  /** null tira o limite; nunca abaixo de `times_redeemed`. */
+  max_redemptions?: number | null;
+  /** null tira a data de fim. */
+  expires_at?: string | null;
+  /** false desativa: deixa de se aplicar, e quem já o tem fica com ele. */
+  active?: boolean;
+  metadata?: Record<string, string>;
+}
+
+export interface ListCouponsParams {
+  /** De 1 a 100; 20 por omissão. */
+  limit?: number;
+  /** O `id` do último cupão da página anterior. */
+  starting_after?: string;
+  /** Só o cupão com este código (sem distinguir maiúsculas). */
+  code?: string;
+}
+
+export interface Coupon {
+  id: string;
+  object: "coupon";
+  mode: Mode;
+  code: string;
+  name: string;
+  percent_off: number | null;
+  amount_off: Money | null;
+  duration: CouponDuration;
+  duration_cycles: number | null;
+  max_redemptions: number | null;
+  /** As sessões pagas com o cupão. O limite conta também as abertas que ainda se podem pagar. */
+  times_redeemed: number;
+  expires_at: string | null;
+  active: boolean;
+  /** Ativo, dentro da data, e com usos por gastar. */
+  valid: boolean;
+  metadata: Record<string, string>;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PlatformFeeParams {
@@ -138,6 +240,8 @@ export interface Payment {
    * (no painel, em Aplicações): é igual à `fee`, e o `net` é o valor da cobrança. null quando a taxa sai do valor.
    */
   fee_on_top: Money | null;
+  /** O cupão com que se pagou e quanto descontou, ou null. O `amount` é já o valor depois dele. */
+  discount: Discount | null;
 }
 
 export type SubscriptionInterval = "week" | "month" | "quarter" | "half_year" | "year";
@@ -197,6 +301,13 @@ export interface CheckoutSession {
    * ou a global do comerciante, congelada quando a sessão nasceu. O comerciante fica com o `amount`.
    */
   fee_on_top: boolean;
+  /**
+   * O cupão aplicado e quanto desconta, ou null. O `amount` da sessão é sempre o preço antes dele:
+   * o checkout cobra `amount` menos `discount.amount`. Numa renovação, é o desconto deste ciclo.
+   */
+  discount: Discount | null;
+  /** O comprador pode escrever um código de desconto no checkout. */
+  allow_promotion_codes: boolean;
 }
 
 export interface RefundParams {
@@ -231,6 +342,8 @@ export interface Subscription {
   amount: Money;
   /** O que o primeiro ciclo custou, quando foi mais barato do que `amount`, ou null. */
   first_cycle_amount: Money | null;
+  /** O cupão da subscrição, ou null: o desconto de cada ciclo que cobre, e quantos. */
+  discount: SubscriptionDiscount | null;
   interval: SubscriptionInterval;
   /** Os ciclos contratados; null renova até ser cancelada. */
   cycles: number | null;
@@ -443,6 +556,10 @@ export declare class SpollyPayments {
   getCheckoutSession(id: string, options?: RequestOptions): Promise<CheckoutSession>;
   createRefund(params: RefundParams, options?: PostOptions): Promise<Refund>;
   getRefund(id: string, options?: RequestOptions): Promise<Refund>;
+  createCoupon(params: CouponParams, options?: PostOptions): Promise<Coupon>;
+  listCoupons(params?: ListCouponsParams, options?: RequestOptions): Promise<List<Coupon>>;
+  getCoupon(id: string, options?: RequestOptions): Promise<Coupon>;
+  updateCoupon(id: string, params: CouponUpdateParams, options?: RequestOptions): Promise<Coupon>;
   getAccount(options?: RequestOptions): Promise<Account>;
   getSubscription(id: string, options?: RequestOptions): Promise<Subscription>;
   cancelSubscription(id: string, params?: CancelSubscriptionParams, options?: PostOptions): Promise<Subscription>;
@@ -503,6 +620,9 @@ export declare const ErrorCodes: Readonly<{
   NEGATIVE_BALANCE: "saldo_negativo";
   INSUFFICIENT_BALANCE: "saldo_insuficiente";
   PAYOUT_REFUSED: "saque_recusado";
+  COUPON_NOT_FOUND: "cupao_nao_existe";
+  COUPON_CODE_TAKEN: "codigo_repetido";
+  COUPON_INVALID: "cupao_invalido";
   INTERNAL: "erro_interno";
   UNAVAILABLE: "indisponivel";
   UNREADABLE_ERROR: "resposta_ilegivel";

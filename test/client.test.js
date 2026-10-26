@@ -703,3 +703,61 @@ test("o webhook de uma conta ligada traz a conta no envelope, e o saldo em bigin
   assert.equal(e.merchant_id, "mer_01JA9BILHETEIRA");
   assert.equal(e.data.object.available[0].amount, -90071992547409930n);
 });
+
+const CUPAO = `{"id":"cpn_test_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0Ab","object":"coupon","mode":"test","code":"MENOS500","name":"",
+"percent_off":null,"amount_off":{"amount":50000,"currency":"AOA"},"duration":"repeating","duration_cycles":3,"max_redemptions":null,
+"times_redeemed":4,"expires_at":null,"active":true,"valid":true,"metadata":{},"created_at":"2026-11-29T08:55:00Z","updated_at":"2026-11-29T08:55:00Z"}`;
+
+test("os cupões", async () => {
+  responder = (_, p) =>
+    p.metodo === "GET" && !p.caminho.startsWith("/v1/coupons/")
+      ? [200, {}, `{"object":"list","data":[${CUPAO}],"has_more":false}`]
+      : [p.metodo === "POST" ? 201 : 200, {}, CUPAO];
+  const c = cliente();
+  const cp = await c.createCoupon({ code: "menos500", amount_off: 50000n, currency: "AOA", duration: "repeating", duration_cycles: 3 }, { idempotencyKey: "cupao-1" });
+  assert.equal(cp.amount_off.amount, 50000n);
+  assert.equal(cp.percent_off, null);
+  assert.equal(cp.times_redeemed, 4);
+  const l = await c.listCoupons({ code: "menos500", limit: 5, starting_after: null });
+  assert.equal(l.data[0].code, "MENOS500");
+  await c.listCoupons();
+  await c.getCoupon("cpn_test_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0Ab");
+  await c.updateCoupon("cpn_test_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0Ab", { active: false, max_redemptions: null });
+  await c.updateCoupon("cpn_1");
+  assert.deepEqual(
+    pedidos.map((p) => [p.metodo, p.caminho, p.corpo]),
+    [
+      ["POST", "/v1/coupons", `{"code":"menos500","amount_off":50000,"currency":"AOA","duration":"repeating","duration_cycles":3}`],
+      ["GET", "/v1/coupons?limit=5&code=menos500", ""],
+      ["GET", "/v1/coupons", ""],
+      ["GET", "/v1/coupons/cpn_test_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0Ab", ""],
+      ["PATCH", "/v1/coupons/cpn_test_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0Ab", `{"active":false,"max_redemptions":null}`],
+      ["PATCH", "/v1/coupons/cpn_1", "{}"],
+    ],
+  );
+  assert.equal(pedidos[0].cab["idempotency-key"], "cupao-1");
+
+  // Uma sessão com cupão, e as recusas.
+  responder = () => [
+    201,
+    {},
+    SESSAO.replace(
+      `"payment":{`,
+      `"allow_promotion_codes":false,"discount":{"coupon":{"id":"cpn_1","code":"MENOS500","name":"","percent_off":null,"amount_off":{"amount":50000,"currency":"AOA"},"duration":"once","duration_cycles":null},"amount":{"amount":50000,"currency":"AOA"}},"payment":{`,
+    ),
+  ];
+  const s = await c.createCheckoutSession({ amount: 1500000n, currency: "AOA", description: "x", coupon: "menos500" });
+  assert.equal(s.discount.amount.amount, 50000n);
+  assert.equal(s.discount.coupon.amount_off.amount, 50000n);
+  assert.equal(pedidos.at(-1).corpo, `{"amount":1500000,"currency":"AOA","description":"x","coupon":"menos500"}`);
+  responder = () => [422, {}, `{"erro":"cupao_invalido","mensagem":"Este cupão expirou."}`];
+  await assert.rejects(c.createCheckoutSession({ amount: 1500000n, currency: "AOA", description: "x", coupon: "VELHO" }), (e) => e.code === ErrorCodes.COUPON_INVALID);
+  responder = () => [409, {}, `{"erro":"codigo_repetido","mensagem":"Já há."}`];
+  await assert.rejects(c.createCoupon({ code: "X", duration: "once", percent_off: 10 }), (e) => e.code === ErrorCodes.COUPON_CODE_TAKEN);
+  responder = () => [404, {}, `{"erro":"cupao_nao_existe","mensagem":"Não há."}`];
+  await assert.rejects(c.getCoupon("cpn_1"), (e) => e.code === ErrorCodes.COUPON_NOT_FOUND);
+  responder = () => [200, {}, `{"object":"list","data":[{"id":"x"}],"has_more":false}`];
+  await assert.rejects(c.listCoupons(), SpollyInvalidResponseError);
+  responder = () => [200, {}, `{"id":"cpn_1","object":"conta"}`];
+  await assert.rejects(c.updateCoupon("cpn_1", { name: "x" }), SpollyInvalidResponseError);
+});

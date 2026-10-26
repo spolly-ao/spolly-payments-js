@@ -8,7 +8,7 @@ recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 `src/webhook.d.ts`).
 
 ```bash
-npm install github:spolly-ao/spolly-payments-js#v0.8.0
+npm install github:spolly-ao/spolly-payments-js#v0.9.0
 ```
 
 O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
@@ -27,6 +27,10 @@ pacote fica com o nome `@spolly-ao/spolly-payments`, que é o que se importa.
 | | `getSubscription(id, { signal })` | `GET /v1/subscriptions/{id}` |
 | | `cancelSubscription(id, { at_period_end }, { idempotencyKey, signal })` | `POST /v1/subscriptions/{id}/cancel` (no fim do ciclo, por omissão) |
 | | `createSubscriptionPortalLink(id, { idempotencyKey, signal })` | `POST /v1/subscriptions/{id}/portal`: o link de uso único da página do cliente |
+| | `createCoupon(params, { idempotencyKey, signal })` | `POST /v1/coupons` |
+| | `listCoupons({ limit, starting_after, code }, { signal })` | `GET /v1/coupons` |
+| | `getCoupon(id, { signal })` | `GET /v1/coupons/{id}` |
+| | `updateCoupon(id, { name, max_redemptions, expires_at, active, metadata }, { signal })` | `PATCH /v1/coupons/{id}` (`null` tira o limite ou a data) |
 | | `withAccount(mer_)`, `account` | Um cliente que age em nome de uma conta ligada (cabeçalho `Spolly-Account`) |
 | | `createAccount(params, { idempotencyKey, signal })` | `POST /v1/accounts` |
 | | `listAccounts({ limit, starting_after, reference }, { signal })` | `GET /v1/accounts` |
@@ -85,7 +89,7 @@ Em desenvolvimento, contra a API local:
 
 ## Dinheiro em `bigint`
 
-Os valores (`amount`, `unit_amount`) **chegam em `bigint`**, lidos do texto da
+Os valores (`amount`, `unit_amount`, e o `amount_off` de um cupão) **chegam em `bigint`**, lidos do texto da
 resposta sem passar por um `number`: `sessao.amount.amount` é `1500000n`. À
 entrada aceitam-se em `bigint`, em `number` inteiro, ou em texto só com
 algarismos; um valor com casas decimais é recusado antes de sair. O
@@ -130,6 +134,35 @@ cobram o `amount` (no cartão, o Stripe renova sozinho pelo preço cheio). Um
 cancelamento no fim do ciclo dá dois `subscription.cancelled`: o do pedido, com a
 subscrição ainda `active`, e o do fim, com `status` `cancelled`; corta-se o
 acesso pelo segundo.
+
+## Cupões
+
+Um cupão é de percentagem (`percent_off`) ou de valor fixo (`amount_off` com
+`currency`, e só vale nessa moeda). Numa subscrição vale no primeiro ciclo
+(`once`), nos primeiros N (`repeating` com `duration_cycles`) ou em todos
+(`forever`). O desconto não muda depois de criado.
+
+```js
+const cupao = await spolly.createCoupon({
+  code: "BEMVINDO10", percent_off: 10, duration: "repeating", duration_cycles: 3, max_redemptions: 100,
+});
+
+// Aplicado já pela loja (recusa: ErrorCodes.COUPON_INVALID, 422):
+const sessao = await spolly.createCheckoutSession({
+  amount: 1500000n, currency: "AOA", description: "Plano mensal", coupon: cupao.code,
+});
+// sessao.discount.amount.amount é quanto desconta; sessao.amount continua a ser o preço.
+
+// Ou escrito pelo comprador no checkout:
+await spolly.createCheckoutSession({ amount: 1500000n, currency: "AOA", description: "Vestido", allow_promotion_codes: true });
+
+// Desativar: deixa de se aplicar, e quem já o tem fica com ele.
+await spolly.updateCoupon(cupao.id, { active: false });
+```
+
+O `payment` do `payment.succeeded` traz o `amount` já descontado, a `fee` sobre
+ele e o `discount`; a subscrição traz o `discount` com os `cycles` que cobre.
+Um cupão não vai com o `first_cycle_amount` de um plano.
 
 ## Comissão de plataforma
 
