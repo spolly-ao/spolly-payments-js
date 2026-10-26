@@ -19,6 +19,8 @@ import {
   PaymentMethods,
   Renewals,
   Settlements,
+  ACCOUNT_HEADER,
+  DocumentTypes,
 } from "../src/index.js";
 
 const SESSAO = `{"id":"cs_test_4f8Gk2LmQ9rT1vXz7bN3cH6sW0pY5aDe","object":"checkout_session","mode":"test","status":"complete",
@@ -444,4 +446,260 @@ test("as subscrições", async () => {
   await assert.rejects(c.createSubscriptionPortalLink("sub_1"), SpollyInvalidResponseError);
   responder = () => [201, {}, `{"object":"subscription_portal"}`];
   await assert.rejects(c.createSubscriptionPortalLink("sub_1"), SpollyInvalidResponseError);
+});
+
+// As contas ligadas: uma plataforma cria e gere pela API os vendedores que vendem por ela.
+
+const CONTA_LIGADA = `{"id":"mer_01JA9VENDEDOR000","object":"account","mode":"test","name":"Kizomba Eventos","legal_name":"Joana Manuel","tax_id":"",
+"email":"joana@kizomba.ao","phone":"+244923456789","reference":"vendedor_481","metadata":{"plano":"pro"},
+"verification":{"status":"pending","reason":"","missing":["identity_document","bank_account"]},"bank_account":null,"documents":[],
+"charges_enabled":true,"payouts_enabled":false,"created_at":"2026-11-29T08:55:00Z"}`;
+const DOCUMENTO = `{"id":"doc_01JA9BI","object":"account_document","type":"identity_document","file_name":"bi.pdf","content_type":"application/pdf","size":182340,"created_at":"2026-11-29T08:58:00Z"}`;
+const SALDO = `{"object":"balance","account":"mer_01JA9VENDEDOR000","available":[{"amount":-90071992547409930,"currency":"AOA"}],"pending":[{"amount":250000,"currency":"AOA"}],"reserved":[]}`;
+const SAQUE = `{"id":"po_01JA9P","object":"payout","amount":{"amount":2500000,"currency":"AOA"},"status":"pending","created_at":"2026-11-30T10:15:00Z","metadata":{"pedido_na_plataforma":"saq_9921"}}`;
+const VENDEDOR = "mer_01JA9VENDEDOR000";
+
+// Lê o multipart que o servidor de ensaio recebeu, com o mesmo leitor do fetch.
+const lerFormulario = (p) => new Response(p.corpo, { headers: { "content-type": p.cab["content-type"] } }).formData();
+
+test("criar, listar, ler e alterar contas ligadas", async () => {
+  responder = (_, p) => {
+    if (p.metodo === "GET" && p.caminho.startsWith("/v1/accounts?")) return [200, {}, `{"object":"list","data":[${CONTA_LIGADA}],"has_more":true}`];
+    if (p.caminho === "/v1/accounts" && p.metodo === "GET") return [200, {}, `{"object":"list","data":[],"has_more":false}`];
+    return [p.metodo === "POST" ? 201 : 200, {}, CONTA_LIGADA];
+  };
+  const c = cliente();
+  const criada = await c.createAccount(
+    { name: "Kizomba Eventos", legal_name: "Joana Manuel", reference: "vendedor_481", metadata: { plano: "pro" } },
+    { idempotencyKey: "vendedor-481" },
+  );
+  assert.equal(criada.id, VENDEDOR);
+  assert.equal(criada.verification.status, "pending");
+  assert.equal(criada.bank_account, null);
+  const pagina = await c.listAccounts({ limit: 10, starting_after: "mer_01JA9ANTERIOR00", reference: undefined });
+  assert.equal(pagina.has_more, true);
+  assert.equal(pagina.data[0].reference, "vendedor_481");
+  await c.listAccounts({ reference: "vendedor 481&x", limit: null });
+  const vazia = await c.listAccounts();
+  assert.deepEqual(vazia, { object: "list", data: [], has_more: false });
+  await c.getConnectedAccount(VENDEDOR);
+  await c.updateAccount("mer_a/b", { metadata: {} });
+  await c.setAccountBankAccount(VENDEDOR, { iban: "AO06004000010123456789012", holder: "Joana Manuel", proof_document: "doc_01JA9IBAN" });
+  assert.deepEqual(
+    pedidos.map((p) => [p.metodo, p.caminho, p.corpo]),
+    [
+      ["POST", "/v1/accounts", `{"name":"Kizomba Eventos","legal_name":"Joana Manuel","reference":"vendedor_481","metadata":{"plano":"pro"}}`],
+      ["GET", "/v1/accounts?limit=10&starting_after=mer_01JA9ANTERIOR00", ""],
+      ["GET", "/v1/accounts?reference=vendedor+481%26x", ""],
+      ["GET", "/v1/accounts", ""],
+      ["GET", `/v1/accounts/${VENDEDOR}`, ""],
+      ["PATCH", "/v1/accounts/mer_a%2Fb", `{"metadata":{}}`],
+      ["PUT", `/v1/accounts/${VENDEDOR}/bank_account`, `{"iban":"AO06004000010123456789012","holder":"Joana Manuel","proof_document":"doc_01JA9IBAN"}`],
+    ],
+  );
+  assert.equal(pedidos[0].cab["idempotency-key"], "vendedor-481");
+  // Só os POST levam a chave; o PATCH e o PUT levam JSON e mais nada.
+  for (const p of pedidos.slice(1)) assert.equal(p.cab["idempotency-key"], undefined);
+  assert.equal(pedidos[5].cab["content-type"], "application/json");
+  assert.equal(pedidos[6].cab["content-type"], "application/json");
+  for (const p of pedidos) assert.equal(p.cab["spolly-account"], undefined);
+});
+
+test("uma lista ou uma conta que não se lê nunca é vazia", async () => {
+  const c = cliente();
+  for (const corpo of [
+    `{"object":"list","data":[{"id":"mer_1","object":"payment"}],"has_more":false}`,
+    `{"object":"list","data":[]}`,
+    `{"object":"list","data":{},"has_more":false}`,
+    `{"data":[],"has_more":false}`,
+    "null",
+  ]) {
+    responder = () => [200, {}, corpo];
+    await assert.rejects(c.listAccounts(), SpollyInvalidResponseError);
+    await assert.rejects(c.listAccountPayouts(VENDEDOR), SpollyInvalidResponseError);
+  }
+  for (const corpo of [`{"id":"acct_1","object":"account"}`, `{"id":"mer_1","object":"merchant"}`, "{}"]) {
+    responder = () => [200, {}, corpo];
+    await assert.rejects(c.getConnectedAccount(VENDEDOR), SpollyInvalidResponseError);
+  }
+});
+
+test("os documentos vão em multipart, com a chave de idempotência, a mesma nas retentativas", async () => {
+  responder = (n) => (n === 1 ? [503, {}, `{"erro":"indisponivel","mensagem":"x"}`] : [201, {}, DOCUMENTO]);
+  const c = cliente();
+  const bytes = new TextEncoder().encode("%PDF-1.7 bilhete");
+  const d = await c.uploadAccountDocument(VENDEDOR, { type: DocumentTypes.IDENTITY_DOCUMENT, file: new Blob([bytes]), filename: "bi.pdf" });
+  assert.equal(d.id, "doc_01JA9BI");
+  assert.equal(d.size, 182340);
+  assert.equal(pedidos.length, 2);
+  assert.equal(pedidos[0].cab["idempotency-key"], pedidos[1].cab["idempotency-key"]);
+  assert.match(pedidos[0].cab["idempotency-key"], UUID4);
+  for (const p of pedidos) {
+    assert.equal(p.metodo, "POST");
+    assert.equal(p.caminho, `/v1/accounts/${VENDEDOR}/documents`);
+    assert.match(p.cab["content-type"], /^multipart\/form-data; boundary=/);
+    const f = await lerFormulario(p);
+    assert.equal(f.get("type"), "identity_document");
+    assert.equal(f.get("file").name, "bi.pdf");
+    assert.equal(await f.get("file").text(), "%PDF-1.7 bilhete");
+  }
+
+  // O nome: o dado, o do File, ou "documento"; e os bytes à solta também servem.
+  responder = () => [201, {}, DOCUMENTO];
+  pedidos = [];
+  await c.uploadAccountDocument(VENDEDOR, { type: "bank_account_proof", file: new File([bytes], "iban.png") }, { idempotencyKey: "iban-1" });
+  await c.uploadAccountDocument(VENDEDOR, { type: "bank_account_proof", file: Buffer.from(bytes) });
+  await c.uploadAccountDocument(VENDEDOR, { type: "bank_account_proof", file: bytes.buffer });
+  await c.uploadAccountDocument(VENDEDOR, { type: "bank_account_proof", file: new File([bytes], "") });
+  const nomes = [];
+  for (const p of pedidos) nomes.push((await lerFormulario(p)).get("file").name);
+  assert.deepEqual(nomes, ["iban.png", "documento", "documento", "documento"]);
+  assert.equal(pedidos[0].cab["idempotency-key"], "iban-1");
+
+  // Um ficheiro ou um tipo que falta não chega à API.
+  pedidos = [];
+  await assert.rejects(c.uploadAccountDocument(VENDEDOR, { type: "identity_document", file: "bi.pdf" }), /o file tem de ser/);
+  await assert.rejects(c.uploadAccountDocument(VENDEDOR, { file: bytes }), /falta o type/);
+  await assert.rejects(c.uploadAccountDocument(VENDEDOR, { type: "", file: bytes }), TypeError);
+  await assert.rejects(c.uploadAccountDocument(VENDEDOR), TypeError);
+  assert.equal(pedidos.length, 0);
+
+  responder = () => [201, {}, `{"id":"doc_1","object":"account"}`];
+  await assert.rejects(c.uploadAccountDocument(VENDEDOR, { type: "identity_document", file: bytes }), SpollyInvalidResponseError);
+  responder = () => [409, {}, `{"erro":"documentos_demais","mensagem":"Já chega."}`];
+  await assert.rejects(c.uploadAccountDocument(VENDEDOR, { type: "identity_document", file: bytes }), (e) => e.code === ErrorCodes.TOO_MANY_DOCUMENTS);
+  assert.equal(DocumentTypes.BANK_ACCOUNT_PROOF, "bank_account_proof");
+  assert.ok(Object.isFrozen(DocumentTypes));
+});
+
+test("o saldo de uma conta ligada vem em bigint, e pode ser negativo", async () => {
+  responder = () => [200, {}, SALDO];
+  const c = cliente();
+  const s = await c.getAccountBalance(VENDEDOR);
+  assert.equal(pedidos[0].caminho, `/v1/accounts/${VENDEDOR}/balance`);
+  assert.deepEqual(s.available, [{ amount: -90071992547409930n, currency: "AOA" }]);
+  assert.equal(s.pending[0].amount, 250000n);
+  assert.deepEqual(s.reserved, []);
+  for (const corpo of [
+    SALDO.replace('"object":"balance"', '"object":"saldo"'),
+    SALDO.replace('"account":"mer_01JA9VENDEDOR000"', '"account":7'),
+    SALDO.replace(',"reserved":[]', ""),
+    SALDO.replace('"amount":250000', '"amount":"250000"'),
+    SALDO.replace('"available":[', '"available":[null,'),
+  ]) {
+    responder = () => [200, {}, corpo];
+    await assert.rejects(c.getAccountBalance(VENDEDOR), SpollyInvalidResponseError);
+  }
+});
+
+test("os saques de uma conta ligada", async () => {
+  responder = (_, p) => {
+    if (p.metodo === "POST") return [201, {}, SAQUE];
+    if (p.caminho.endsWith("/payouts")) return [200, {}, `{"object":"list","data":[${SAQUE}],"has_more":false}`];
+    return [200, {}, SAQUE.replace('"status":"pending"', '"status":"paid","paid_at":"2026-11-30T12:00:00Z"')];
+  };
+  const c = cliente();
+  const po = await c.createAccountPayout(VENDEDOR, { amount: 2500000n, currency: "AOA", metadata: { pedido_na_plataforma: "saq_9921" } });
+  assert.equal(po.status, "pending");
+  assert.equal(po.amount.amount, 2500000n);
+  assert.equal(po.metadata.pedido_na_plataforma, "saq_9921");
+  const l = await c.listAccountPayouts(VENDEDOR);
+  assert.equal(l.data[0].id, "po_01JA9P");
+  const pago = await c.getAccountPayout(VENDEDOR, "po_01JA9P/x");
+  assert.equal(pago.status, "paid");
+  assert.deepEqual(
+    pedidos.map((p) => [p.metodo, p.caminho, p.corpo]),
+    [
+      ["POST", `/v1/accounts/${VENDEDOR}/payouts`, `{"amount":2500000,"currency":"AOA","metadata":{"pedido_na_plataforma":"saq_9921"}}`],
+      ["GET", `/v1/accounts/${VENDEDOR}/payouts`, ""],
+      ["GET", `/v1/accounts/${VENDEDOR}/payouts/po_01JA9P%2Fx`, ""],
+    ],
+  );
+  assert.match(pedidos[0].cab["idempotency-key"], UUID4);
+  // O valor de um saque é dinheiro como os outros: nunca com casas decimais.
+  await assert.rejects(c.createAccountPayout(VENDEDOR, { amount: 25000.5 }), /amount tem de ser um inteiro/);
+  assert.equal(pedidos.length, 3);
+  for (const [estado, codigo, nome] of [
+    [409, "saldo_insuficiente", "INSUFFICIENT_BALANCE"],
+    [409, "saldo_negativo", "NEGATIVE_BALANCE"],
+    [409, "conta_por_verificar", "ACCOUNT_NOT_VERIFIED"],
+    [409, "conta_bancaria_por_verificar", "BANK_ACCOUNT_NOT_VERIFIED"],
+    [403, "saque_recusado", "PAYOUT_REFUSED"],
+    [403, "contas_ligadas_nao_habilitadas", "CONNECTED_ACCOUNTS_NOT_ENABLED"],
+    [400, "spolly_account_nao_serve_aqui", "ACCOUNT_HEADER_NOT_ALLOWED"],
+    [403, "conta_de_outro_modo", "ACCOUNT_OTHER_MODE"],
+    [404, "conta_nao_existe", "ACCOUNT_NOT_FOUND"],
+    [404, "saque_nao_existe", "PAYOUT_NOT_FOUND"],
+    [409, "referencia_repetida", "REFERENCE_TAKEN"],
+    [409, "verificacao_nao_deixa", "VERIFICATION_LOCKED"],
+  ]) {
+    assert.equal(ErrorCodes[nome], codigo);
+    responder = () => [estado, {}, JSON.stringify({ erro: codigo, mensagem: "recusado" })];
+    await assert.rejects(c.createAccountPayout(VENDEDOR, { amount: 500000 }), (e) => e instanceof SpollyError && e.status === estado && e.code === codigo);
+  }
+});
+
+test("withAccount age em nome da conta ligada, e nunca nas rotas /v1/accounts", async () => {
+  responder = (_, p) => {
+    if (p.caminho === "/v1/conta") return [200, {}, CONTA.replace("mer_01JA9SALUTO000000", VENDEDOR)];
+    if (p.caminho.startsWith("/v1/refunds")) return [201, {}, ESTORNO];
+    if (p.caminho.startsWith("/v1/subscriptions")) return [200, {}, SUBSCRICAO];
+    if (p.caminho.endsWith("/balance")) return [200, {}, SALDO];
+    if (p.caminho.startsWith("/v1/accounts?")) return [200, {}, `{"object":"list","data":[],"has_more":false}`];
+    if (p.caminho.startsWith("/v1/accounts")) return [200, {}, CONTA_LIGADA];
+    return [201, {}, SESSAO];
+  };
+  const plataforma = cliente({ userAgent: "bilheteira/2.0" });
+  assert.equal(plataforma.account, null);
+  const vendedor = plataforma.withAccount(VENDEDOR);
+  assert.equal(vendedor.account, VENDEDOR);
+  assert.notEqual(vendedor, plataforma);
+  assert.equal((await vendedor.getAccount()).merchant_id, VENDEDOR);
+  await vendedor.createCheckoutSession({ amount: 1500000n, currency: "AOA", description: "Bilhete", platform_fee: { amount: 150000n } });
+  await vendedor.getCheckoutSession("cs_test_1");
+  await vendedor.createRefund({ payment_id: "pay_1" });
+  await vendedor.getRefund("re_1");
+  await vendedor.getSubscription("sub_1");
+  await vendedor.cancelSubscription("sub_1");
+  // As rotas da plataforma: a conta vai no caminho, e o cabeçalho não sai.
+  await vendedor.getConnectedAccount(VENDEDOR);
+  await vendedor.listAccounts({ limit: 1 });
+  await vendedor.getAccountBalance(VENDEDOR);
+  // O cliente da plataforma continua a ser da plataforma.
+  await plataforma.getAccount();
+  const cab = pedidos.map((p) => [p.caminho, p.cab["spolly-account"] ?? null]);
+  assert.deepEqual(cab, [
+    ["/v1/conta", VENDEDOR],
+    ["/v1/checkout/sessions", VENDEDOR],
+    ["/v1/checkout/sessions/cs_test_1", VENDEDOR],
+    ["/v1/refunds", VENDEDOR],
+    ["/v1/refunds/re_1", VENDEDOR],
+    ["/v1/subscriptions/sub_1", VENDEDOR],
+    ["/v1/subscriptions/sub_1/cancel", VENDEDOR],
+    [`/v1/accounts/${VENDEDOR}`, null],
+    ["/v1/accounts?limit=1", null],
+    [`/v1/accounts/${VENDEDOR}/balance`, null],
+    ["/v1/conta", null],
+  ]);
+  // A sessão em nome da conta pode deixar a plataforma da comissão de fora.
+  assert.equal(pedidos[1].corpo, `{"amount":1500000,"currency":"AOA","description":"Bilhete","platform_fee":{"amount":150000}}`);
+  // A mesma configuração: a chave, o endereço e o User-Agent.
+  for (const p of pedidos) {
+    assert.equal(p.cab.authorization, "Bearer sk_test_abc");
+    assert.equal(p.cab["user-agent"], `bilheteira/2.0 spolly-payments-js/${VERSION}`);
+  }
+  assert.equal(ACCOUNT_HEADER, "Spolly-Account");
+  // Uma conta de outra conta ligada: um cliente novo, a partir de qualquer um.
+  assert.equal(vendedor.withAccount("mer_OUTRO0000000000").account, "mer_OUTRO0000000000");
+  for (const errado of ["", "acct_1", "mer_", "mer_a/b", undefined, 7]) {
+    assert.throws(() => plataforma.withAccount(errado), /a conta ligada tem de ser um identificador mer_/);
+  }
+});
+
+test("o webhook de uma conta ligada traz a conta no envelope, e o saldo em bigint", () => {
+  const corpo = `{"id":"evt_01JA9X8Y8D","type":"balance.available","created_at":"2026-11-30T10:15:00Z","mode":"live","merchant_id":"mer_01JA9BILHETEIRA","application":"app_01JA9BILHETES","account":"${VENDEDOR}","api_version":"2026-10-16","data":{"object":${SALDO}}}`;
+  const e = constructEvent(corpo, sign(corpo, "whsec_1"), "whsec_1");
+  assert.equal(e.account, VENDEDOR);
+  assert.equal(e.merchant_id, "mer_01JA9BILHETEIRA");
+  assert.equal(e.data.object.available[0].amount, -90071992547409930n);
 });

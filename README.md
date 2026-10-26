@@ -2,12 +2,13 @@
 
 O SDK em JavaScript do [Spolly Payments](https://github.com/spolly-ao/spolly-payments),
 para servidores em Node: criar e ler sessões de checkout, estornar, confirmar a
-conta da chave, e verificar a assinatura dos webhooks. ESM, Node 22 ou mais
+conta da chave, gerir as contas ligadas de uma plataforma, e verificar a
+assinatura dos webhooks. ESM, Node 22 ou mais
 recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 `src/webhook.d.ts`).
 
 ```bash
-npm install github:spolly-ao/spolly-payments-js#v0.7.0
+npm install github:spolly-ao/spolly-payments-js#v0.8.0
 ```
 
 O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
@@ -26,9 +27,21 @@ pacote fica com o nome `@spolly-ao/spolly-payments`, que é o que se importa.
 | | `getSubscription(id, { signal })` | `GET /v1/subscriptions/{id}` |
 | | `cancelSubscription(id, { at_period_end }, { idempotencyKey, signal })` | `POST /v1/subscriptions/{id}/cancel` (no fim do ciclo, por omissão) |
 | | `createSubscriptionPortalLink(id, { idempotencyKey, signal })` | `POST /v1/subscriptions/{id}/portal`: o link de uso único da página do cliente |
+| | `withAccount(mer_)`, `account` | Um cliente que age em nome de uma conta ligada (cabeçalho `Spolly-Account`) |
+| | `createAccount(params, { idempotencyKey, signal })` | `POST /v1/accounts` |
+| | `listAccounts({ limit, starting_after, reference }, { signal })` | `GET /v1/accounts` |
+| | `getConnectedAccount(id, { signal })` | `GET /v1/accounts/{id}` |
+| | `updateAccount(id, params, { signal })` | `PATCH /v1/accounts/{id}` |
+| | `uploadAccountDocument(id, { type, file, filename }, { idempotencyKey, signal })` | `POST /v1/accounts/{id}/documents`, em multipart |
+| | `setAccountBankAccount(id, { iban, holder, holder_tax_id, proof_document }, { signal })` | `PUT /v1/accounts/{id}/bank_account` |
+| | `getAccountBalance(id, { signal })` | `GET /v1/accounts/{id}/balance` |
+| | `createAccountPayout(id, { amount, currency, metadata }, { idempotencyKey, signal })` | `POST /v1/accounts/{id}/payouts` |
+| | `listAccountPayouts(id, { signal })` | `GET /v1/accounts/{id}/payouts` |
+| | `getAccountPayout(id, payoutId, { signal })` | `GET /v1/accounts/{id}/payouts/{payout_id}` |
 | | `SpollyError` (`status`, `code`, `userMessage`, `fields`, `idempotencyKey`), `ErrorCodes` | As recusas da API |
 | | `SpollyConnectionError`, `SpollyInvalidResponseError` | A API não respondeu; uma resposta que não se lê |
 | | `PaymentMethods` (com `BANK_TRANSFER` e `DIRECT_DEBIT`, só em AOA e só quando pedidos por nome), `Renewals` (`AUTOMATIC`, `NOTICE`: o `renewal` da subscrição), `Settlements` (`BALANCE`, `MERCHANT_ACCOUNT`: o `settlement` de um pagamento; na transferência bancária, o dinheiro entra direto na conta do comerciante, que o confirma no painel, e a taxa sai do saldo dele; uma transferência não se estorna pela API, `PAID_TO_MERCHANT_ACCOUNT`) | Os valores do contrato |
+| | `DocumentTypes` (`IDENTITY_DOCUMENT`, `BANK_ACCOUNT_PROOF`), `ACCOUNT_HEADER` | Os documentos da verificação de uma conta ligada; o nome do cabeçalho |
 | | `isPaid(sessao)`, `newIdempotencyKey()`, `parseJSON(texto)` | Ajudas |
 | `@spolly-ao/spolly-payments/webhook` (e reexportados na raiz) | `constructEvent`, `verifySignature`, `sign`, `WebhookVerificationError`, `Reasons`, `SIGNATURE_HEADER` | A assinatura dos webhooks |
 
@@ -134,6 +147,80 @@ const sessao = await hotel.createCheckoutSession({
 // PLATFORM_FEE_ABOVE_MAXIMUM e PLATFORM_FEE_INVALID (422).
 // No payment.succeeded, data.object.platform_fee diz o que a plataforma
 // recebeu, e o net é o que fica ao comerciante.
+```
+
+## Contas ligadas
+
+Uma plataforma com as contas ligadas habilitadas pela equipa do Spolly Payments
+cria e gere pela API os vendedores que vendem por ela, e o vendedor nunca fala
+connosco. Sem habilitação, estas operações dão 403
+`ErrorCodes.CONNECTED_ACCOUNTS_NOT_ENABLED`.
+
+```js
+import { readFile } from "node:fs/promises";
+import { DocumentTypes } from "@spolly-ao/spolly-payments";
+
+const spolly = new SpollyPayments(process.env.SPOLLY_SECRET_KEY); // a chave da plataforma
+
+// 1. O vendedor, no modo da chave. Só o name é obrigatório.
+const conta = await spolly.createAccount({
+  name: "Kizomba Eventos", legal_name: "Joana Manuel",
+  email: "joana@kizomba.ao", reference: "vendedor_481",
+});
+
+// 2. A verificação: o documento de identificação, o comprovativo do IBAN, e a conta bancária.
+await spolly.uploadAccountDocument(conta.id, {
+  type: DocumentTypes.IDENTITY_DOCUMENT,
+  file: new Blob([await readFile("bi.pdf")]), filename: "bi.pdf", // ou um File, um Buffer, um Uint8Array
+});
+const comprovativo = await spolly.uploadAccountDocument(conta.id, {
+  type: DocumentTypes.BANK_ACCOUNT_PROOF, file: await readFile("iban.pdf"), filename: "iban.pdf",
+});
+await spolly.setAccountBankAccount(conta.id, {
+  iban: "AO06004000010123456789012", holder: "Joana Manuel", proof_document: comprovativo.id,
+});
+// conta.verification.status e conta.verification.missing dizem o que falta;
+// o account.updated avisa quando muda. Em teste, aprova-se sozinha.
+
+// 3. Cobrar em nome da conta: withAccount manda o cabeçalho Spolly-Account.
+const vendedor = spolly.withAccount(conta.id);
+const sessao = await vendedor.createCheckoutSession({
+  amount: 1500000n, currency: "AOA", description: "Bilhete",
+  platform_fee: { amount: 150000n }, // a plataforma da comissão é a da chave
+});
+
+// 4. O saldo e os saques.
+const saldo = await spolly.getAccountBalance(conta.id);
+// saldo.available, pending e reserved: listas de { amount: bigint, currency }, e podem ser negativos.
+const saque = await spolly.createAccountPayout(conta.id, { amount: 2500000n }); // mínimo 5.000 Kz, só AOA
+```
+
+- `withAccount` devolve um cliente novo, com a mesma chave e a mesma
+  configuração; o original continua a ser da plataforma. Serve para as sessões,
+  os estornos, as subscrições e o `getAccount`. As operações de `/v1/accounts`
+  nunca mandam o cabeçalho (a API recusa-o nelas), porque a conta vai no
+  caminho.
+- `listAccounts` devolve `{ object: "list", data, has_more }`; a página
+  seguinte pede-se com `starting_after` igual ao `id` da última.
+- O documento vai em `multipart/form-data`, com a `Idempotency-Key` como os
+  outros `POST` (a mesma nas retentativas). O `PATCH` e o `PUT` não a levam.
+- Os saques passam por `pending`, `processing` e `paid`, ou `failed` (o valor
+  volta ao disponível), e cada passo chega como evento.
+- Recusas próprias: `ACCOUNT_NOT_FOUND`, `PAYOUT_NOT_FOUND`, `REFERENCE_TAKEN`,
+  `VERIFICATION_LOCKED`, `TOO_MANY_DOCUMENTS`, `ACCOUNT_NOT_VERIFIED`,
+  `BANK_ACCOUNT_NOT_VERIFIED`, `NEGATIVE_BALANCE`, `INSUFFICIENT_BALANCE`,
+  `PAYOUT_REFUSED`.
+
+Os eventos de uma conta ligada chegam aos webhooks da plataforma (o
+`merchant_id` é a plataforma), com a conta em `evento.account`; sem esse campo,
+o evento é do próprio comerciante. Há quatro tipos novos: `account.updated` (o
+objeto é a conta), `balance.available` (o saldo), `payout.created` e
+`payout.processing`, além do `payout.paid` e do `payout.failed`.
+
+```js
+if (evento.account && evento.type === "payout.paid") {
+  marcarSaquePago(evento.account, evento.data.object.id);
+}
 ```
 
 ## Um pagamento em análise

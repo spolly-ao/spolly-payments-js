@@ -25,13 +25,17 @@ export declare class WebhookVerificationError extends Error {
 }
 
 export type EventType =
+  | "account.updated"
+  | "balance.available"
   | "checkout.session.expired"
   | "payment.failed"
   | "payment.held"
   | "payment.released"
   | "payment.succeeded"
+  | "payout.created"
   | "payout.failed"
   | "payout.paid"
+  | "payout.processing"
   | "refund.created"
   | "subscription.cancelled"
   | "subscription.created"
@@ -54,6 +58,12 @@ export interface Event<T = Record<string, unknown>> {
    * link que criou a sessão), ou `null`. Só chega aos endpoints dessa aplicação.
    */
   application: string | null;
+  /**
+   * Só nos eventos de uma conta ligada: a conta de onde o evento vem (mer_...).
+   * O `merchant_id` é então a plataforma dona da conta. Sem este campo, o
+   * evento é do próprio comerciante.
+   */
+  account?: string;
   api_version: string;
   data: { object: T };
 }

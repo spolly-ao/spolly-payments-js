@@ -9,6 +9,8 @@ export declare const DEFAULT_TIMEOUT_MS: number;
 export declare const DEFAULT_MAX_RETRIES: number;
 export declare const IDEMPOTENCY_KEY_HEADER: "Idempotency-Key";
 export declare const IDEMPOTENT_REPLAYED_HEADER: "Idempotent-Replayed";
+/** O cabeçalho com que uma plataforma age em nome de uma conta ligada dela. */
+export declare const ACCOUNT_HEADER: "Spolly-Account";
 
 /** Um valor em unidades menores inteiras, à entrada: 15.000,00 Kz é `1500000n`. */
 export type MinorUnits = bigint | number | string;
@@ -91,8 +93,11 @@ export interface CheckoutSessionParams {
 }
 
 export interface PlatformFeeParams {
-  /** O identificador de comerciante da plataforma (mer_...). */
-  platform: string;
+  /**
+   * O identificador de comerciante da plataforma (mer_...). Num cliente de
+   * `withAccount`, pode ficar de fora: a plataforma é a da chave.
+   */
+  platform?: string;
   /** Em unidades menores da moeda da sessão (em AOA, múltiplo de 100). */
   amount: MinorUnits;
 }
@@ -262,6 +267,154 @@ export interface SubscriptionPortalLink {
   expires_at: string;
 }
 
+/** Uma lista da API: uma página de objetos, e se há mais depois dela. */
+export interface List<T> {
+  object: "list";
+  data: T[];
+  has_more: boolean;
+}
+
+/** Os dados de uma conta ligada: no `createAccount` o `name` é obrigatório, no `updateAccount` nenhum é. */
+export interface ConnectedAccountParams {
+  /** O nome que o comprador vê no checkout, até 120 carateres. */
+  name?: string;
+  /** O nome legal do titular, tal como no documento de identificação. */
+  legal_name?: string;
+  /** O NIF, se o houver (9 a 14 letras e dígitos). */
+  tax_id?: string;
+  email?: string;
+  phone?: string;
+  /** O id do vendedor do lado da plataforma, único por plataforma e modo. */
+  reference?: string;
+  /** Até 20 chaves; no `updateAccount`, substitui os metadados todos. */
+  metadata?: Record<string, string>;
+}
+
+export interface CreateConnectedAccountParams extends ConnectedAccountParams {
+  name: string;
+}
+
+export interface ListConnectedAccountsParams {
+  /** De 1 a 100; 20 por omissão. */
+  limit?: number;
+  /** O `id` da última conta da página anterior. */
+  starting_after?: string;
+  /** Só a conta com esta referência. */
+  reference?: string;
+}
+
+export type DocumentType = "identity_document" | "bank_account_proof";
+export declare const DocumentTypes: Readonly<{ IDENTITY_DOCUMENT: "identity_document"; BANK_ACCOUNT_PROOF: "bank_account_proof" }>;
+
+export interface UploadDocumentParams {
+  type: DocumentType;
+  /** O ficheiro, em PDF, JPEG ou PNG, até 10 MiB. O tipo reconhece-se pelo conteúdo. */
+  file: Blob | Uint8Array | ArrayBuffer;
+  /** O nome do ficheiro; sem ele, o de um `File`, ou "documento". */
+  filename?: string;
+}
+
+/** Um documento da verificação de uma conta ligada. */
+export interface AccountDocument {
+  id: string;
+  object: "account_document";
+  type: DocumentType | "other";
+  file_name: string;
+  content_type: string;
+  size: number;
+  created_at: string;
+}
+
+export interface BankAccountParams {
+  /** O IBAN angolano (AO06...), com ou sem espaços. */
+  iban: string;
+  /** O titular, tal como no comprovativo do banco. */
+  holder: string;
+  /** O NIF do titular, quando o nome não bate letra a letra com o `legal_name`. */
+  holder_tax_id?: string;
+  /** Um documento `bank_account_proof` desta conta (doc_...). */
+  proof_document: string;
+}
+
+export type VerificationStatus = "pending" | "in_review" | "verified" | "rejected" | "more_documents";
+
+/** Uma conta ligada: um vendedor da plataforma, criado e gerido por ela pela API. */
+export interface ConnectedAccount {
+  id: string;
+  object: "account";
+  /** O modo da chave que a criou. Uma conta ligada vive num modo só. */
+  mode: Mode;
+  name: string;
+  legal_name: string;
+  tax_id: string;
+  email: string;
+  phone: string;
+  reference: string;
+  metadata: Record<string, string>;
+  verification: {
+    status: VerificationStatus;
+    /** O motivo da equipa, em `rejected` e `more_documents`. */
+    reason: string;
+    /** O que falta entregar para a verificação seguir sozinha para análise. */
+    missing: Array<"legal_name" | "identity_document" | "bank_account">;
+  };
+  bank_account: {
+    id: string;
+    iban_last4: string;
+    holder: string;
+    /** Um IBAN mudado depois da verificação fica `pending_verification`, e a conta não saca até lá. */
+    status: "verified" | "pending_verification";
+    created_at: string;
+  } | null;
+  documents: AccountDocument[];
+  /** Se a plataforma pode cobrar em nome da conta. */
+  charges_enabled: boolean;
+  /** Se a conta pode sacar: verificada, com a conta bancária verificada. */
+  payouts_enabled: boolean;
+  created_at: string;
+}
+
+/** Dinheiro com sinal: um saldo pode ser negativo. `amount` em `bigint`, em unidades menores. */
+export interface SignedMoney {
+  amount: bigint;
+  currency: Currency;
+}
+
+/** O saldo de uma conta, por moeda, lido do livro. */
+export interface Balance {
+  object: "balance";
+  account: string;
+  /** O que se pode sacar. */
+  available: SignedMoney[];
+  /** O que ainda não foi libertado. */
+  pending: SignedMoney[];
+  /** A reserva. */
+  reserved: SignedMoney[];
+}
+
+export interface PayoutParams {
+  /** Em unidades menores; em AOA, kwanzas inteiros (múltiplo de 100). Mínimo 5.000 Kz. */
+  amount: MinorUnits;
+  currency?: "AOA";
+  metadata?: Record<string, string>;
+}
+
+export type PayoutStatus = "pending" | "processing" | "paid" | "failed";
+
+/** Um saque do saldo disponível para a conta bancária verificada. */
+export interface Payout {
+  id: string;
+  object: "payout";
+  amount: Money;
+  /** `pending` (pedido), `processing` (aprovado, à espera da transferência), `paid` ou `failed`. */
+  status: PayoutStatus;
+  /** Só num saque recusado: o motivo da equipa. */
+  failure_reason?: string;
+  paid_at?: string;
+  created_at: string;
+  metadata?: Record<string, string>;
+}
+
 export interface ClientOptions {
   /** O endereço da API. https://payments-api.spolly.ao por omissão. */
   baseURL?: string;
@@ -294,6 +447,25 @@ export declare class SpollyPayments {
   getSubscription(id: string, options?: RequestOptions): Promise<Subscription>;
   cancelSubscription(id: string, params?: CancelSubscriptionParams, options?: PostOptions): Promise<Subscription>;
   createSubscriptionPortalLink(id: string, options?: PostOptions): Promise<SubscriptionPortalLink>;
+
+  /**
+   * Um cliente igual a este que manda `Spolly-Account` em cada pedido, e age em
+   * nome dessa conta ligada. As operações de `/v1/accounts` nunca o mandam.
+   */
+  withAccount(accountId: string): SpollyPayments;
+  /** A conta ligada em nome de quem este cliente age, ou `null`. */
+  readonly account: string | null;
+
+  createAccount(params: CreateConnectedAccountParams, options?: PostOptions): Promise<ConnectedAccount>;
+  listAccounts(params?: ListConnectedAccountsParams, options?: RequestOptions): Promise<List<ConnectedAccount>>;
+  getConnectedAccount(id: string, options?: RequestOptions): Promise<ConnectedAccount>;
+  updateAccount(id: string, params: ConnectedAccountParams, options?: RequestOptions): Promise<ConnectedAccount>;
+  uploadAccountDocument(id: string, params: UploadDocumentParams, options?: PostOptions): Promise<AccountDocument>;
+  setAccountBankAccount(id: string, params: BankAccountParams, options?: RequestOptions): Promise<ConnectedAccount>;
+  getAccountBalance(id: string, options?: RequestOptions): Promise<Balance>;
+  createAccountPayout(id: string, params: PayoutParams, options?: PostOptions): Promise<Payout>;
+  listAccountPayouts(id: string, options?: RequestOptions): Promise<List<Payout>>;
+  getAccountPayout(id: string, payoutId: string, options?: RequestOptions): Promise<Payout>;
 }
 
 export declare const ErrorCodes: Readonly<{
@@ -318,6 +490,19 @@ export declare const ErrorCodes: Readonly<{
   PLATFORM_NOT_AUTHORIZED: "plataforma_nao_autorizada";
   PLATFORM_FEE_ABOVE_MAXIMUM: "comissao_acima_do_maximo";
   PLATFORM_FEE_INVALID: "comissao_invalida";
+  CONNECTED_ACCOUNTS_NOT_ENABLED: "contas_ligadas_nao_habilitadas";
+  ACCOUNT_HEADER_NOT_ALLOWED: "spolly_account_nao_serve_aqui";
+  ACCOUNT_OTHER_MODE: "conta_de_outro_modo";
+  ACCOUNT_NOT_FOUND: "conta_nao_existe";
+  PAYOUT_NOT_FOUND: "saque_nao_existe";
+  REFERENCE_TAKEN: "referencia_repetida";
+  VERIFICATION_LOCKED: "verificacao_nao_deixa";
+  TOO_MANY_DOCUMENTS: "documentos_demais";
+  ACCOUNT_NOT_VERIFIED: "conta_por_verificar";
+  BANK_ACCOUNT_NOT_VERIFIED: "conta_bancaria_por_verificar";
+  NEGATIVE_BALANCE: "saldo_negativo";
+  INSUFFICIENT_BALANCE: "saldo_insuficiente";
+  PAYOUT_REFUSED: "saque_recusado";
   INTERNAL: "erro_interno";
   UNAVAILABLE: "indisponivel";
   UNREADABLE_ERROR: "resposta_ilegivel";

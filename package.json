@@ -1,7 +1,7 @@
 {
   "name": "@spolly-ao/spolly-payments",
-  "version": "0.7.0",
-  "description": "O SDK em JavaScript do Spolly Payments: o cliente da API (sessões de checkout, estornos, conta) e a verificação da assinatura dos webhooks.",
+  "version": "0.8.0",
+  "description": "O SDK em JavaScript do Spolly Payments: o cliente da API (sessões de checkout, estornos, conta, contas ligadas) e a verificação da assinatura dos webhooks.",
   "type": "module",
   "license": "UNLICENSED",
   "private": true,

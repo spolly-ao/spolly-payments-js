@@ -1,7 +1,9 @@
 // O cliente em JavaScript da API do Spolly Payments: criar e ler sessões de
-// checkout, estornar, e confirmar a conta da chave. As mesmas operações e os
-// mesmos nomes do SDK em Go (spolly-payments-go). A verificação da assinatura
-// dos webhooks está em ./webhook.js, e reexporta-se aqui.
+// checkout, estornar, confirmar a conta da chave, e, numa plataforma com as
+// contas ligadas habilitadas, criar e gerir os vendedores que vendem por ela.
+// As mesmas operações e os mesmos nomes do SDK em Go (spolly-payments-go). A
+// verificação da assinatura dos webhooks está em ./webhook.js, e reexporta-se
+// aqui.
 //
 // O que o cliente faz sozinho:
 //
@@ -13,6 +15,9 @@
 //   exponencial e aleatória, e respeita o Retry-After. Um 4xx nunca se repete.
 // - Tempo limite: 30 segundos por tentativa (`timeoutMs`); o `signal` de quem
 //   chama manda sobre tudo.
+// - Contas ligadas: `withAccount("mer_...")` devolve um cliente que manda o
+//   cabeçalho Spolly-Account em cada pedido, e age em nome dessa conta. As
+//   rotas /v1/accounts nunca o levam: a conta vai no caminho.
 //
 // Dinheiro: os campos `amount` e `unit_amount` chegam como `bigint`, lidos do
 // texto da resposta sem passar por um `number`, e aceitam-se como `bigint`,
@@ -26,7 +31,7 @@ export { parseJSON } from "./json.js";
 export { constructEvent, verifySignature, sign, WebhookVerificationError, Reasons, SIGNATURE_HEADER, EVENT_ID_HEADER, EVENT_TYPE_HEADER, DEFAULT_TOLERANCE_SECONDS } from "./webhook.js";
 
 /** A versão deste SDK, que vai no User-Agent. */
-export const VERSION = "0.7.0";
+export const VERSION = "0.8.0";
 
 /** A API de produção. As chaves sk_test_ também a usam: o modo é o da chave. */
 export const DEFAULT_BASE_URL = "https://payments-api.spolly.ao";
@@ -34,6 +39,8 @@ export const DEFAULT_TIMEOUT_MS = 30_000;
 export const DEFAULT_MAX_RETRIES = 2;
 export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
 export const IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed";
+/** O cabeçalho com que uma plataforma age em nome de uma conta ligada dela. */
+export const ACCOUNT_HEADER = "Spolly-Account";
 
 const ESPERA_BASE_MS = 500;
 const ESPERA_MAXIMA_MS = 8_000;
@@ -75,6 +82,14 @@ export const Settlements = Object.freeze({
   MERCHANT_ACCOUNT: "merchant_account",
 });
 
+/** Os documentos que uma plataforma entrega para a verificação de uma conta ligada. */
+export const DocumentTypes = Object.freeze({
+  /** O documento de identificação do titular: bilhete de identidade ou passaporte. */
+  IDENTITY_DOCUMENT: "identity_document",
+  /** O comprovativo do IBAN, emitido pelo banco. */
+  BANK_ACCOUNT_PROOF: "bank_account_proof",
+});
+
 /** Os códigos de erro da API (o campo `erro` do corpo), estáveis. */
 export const ErrorCodes = Object.freeze({
   INVALID_REQUEST: "pedido_invalido",
@@ -102,6 +117,32 @@ export const ErrorCodes = Object.freeze({
   PLATFORM_FEE_ABOVE_MAXIMUM: "comissao_acima_do_maximo",
   /** A comissão é zero, negativa, da própria plataforma, deixava o comerciante sem líquido, ou vinha com `bank_transfer` (422). */
   PLATFORM_FEE_INVALID: "comissao_invalida",
+  /** A conta da chave não tem as contas ligadas habilitadas (403). */
+  CONNECTED_ACCOUNTS_NOT_ENABLED: "contas_ligadas_nao_habilitadas",
+  /** O cabeçalho Spolly-Account numa rota de /v1/accounts, onde a conta vai no caminho (400). */
+  ACCOUNT_HEADER_NOT_ALLOWED: "spolly_account_nao_serve_aqui",
+  /** A conta do Spolly-Account foi criada com uma chave do outro modo (403). */
+  ACCOUNT_OTHER_MODE: "conta_de_outro_modo",
+  /** A conta ligada não existe nesta plataforma, neste modo (404). */
+  ACCOUNT_NOT_FOUND: "conta_nao_existe",
+  /** O saque não existe nesta conta ligada (404). */
+  PAYOUT_NOT_FOUND: "saque_nao_existe",
+  /** Já há uma conta ligada desta plataforma, neste modo, com esta referência (409). */
+  REFERENCE_TAKEN: "referencia_repetida",
+  /** A verificação da conta não deixa mudar isto agora: está em análise, ou já aprovada (409). */
+  VERIFICATION_LOCKED: "verificacao_nao_deixa",
+  /** A conta ligada já tem o máximo de documentos (409). */
+  TOO_MANY_DOCUMENTS: "documentos_demais",
+  /** A conta ligada ainda não está verificada: não saca, e em produção não se cobra em nome dela (409, 403). */
+  ACCOUNT_NOT_VERIFIED: "conta_por_verificar",
+  /** A conta bancária da conta ligada ainda não está verificada (409). */
+  BANK_ACCOUNT_NOT_VERIFIED: "conta_bancaria_por_verificar",
+  /** A conta tem saldo negativo, e não saca até o cobrir (409). */
+  NEGATIVE_BALANCE: "saldo_negativo",
+  /** O valor do saque passa o saldo disponível (409). */
+  INSUFFICIENT_BALANCE: "saldo_insuficiente",
+  /** O saque não pode ser feito (403). */
+  PAYOUT_REFUSED: "saque_recusado",
   INTERNAL: "erro_interno",
   UNAVAILABLE: "indisponivel",
   /** Posto pelo SDK: a API respondeu com um erro cujo corpo não se lê. */
@@ -165,7 +206,19 @@ const valido = {
   subscricao: (o) => typeof o?.id === "string" && o.id.startsWith("sub_") && o.object === "subscription",
   portal: (o) => o?.object === "subscription_portal" && typeof o.url === "string" && o.url !== "",
   conta: (o) => typeof o?.merchant_id === "string" && o.merchant_id.startsWith("mer_") && (o.modo === "test" || o.modo === "live"),
+  contaLigada: (o) => typeof o?.id === "string" && o.id.startsWith("mer_") && o.object === "account",
+  documento: (o) => typeof o?.id === "string" && o.id.startsWith("doc_") && o.object === "account_document",
+  saldo: (o) =>
+    o?.object === "balance" && typeof o.account === "string" && ["available", "pending", "reserved"].every((k) => Array.isArray(o[k]) && o[k].every((d) => typeof d?.amount === "bigint")),
+  saque: (o) => typeof o?.id === "string" && o.id.startsWith("po_") && o.object === "payout",
 };
+
+// Uma lista da API ({object: "list", data, has_more}), com cada item conferido.
+const lista = (item) => (o) => o?.object === "list" && Array.isArray(o.data) && typeof o.has_more === "boolean" && o.data.every(item);
+const contasLigadas = lista(valido.contaLigada);
+const saques = lista(valido.saque);
+
+const caminhoDaConta = (id) => `/v1/accounts/${encodeURIComponent(id)}`;
 
 /** O cliente da API. Cria-se um e reutiliza-se. */
 export class SpollyPayments {
@@ -177,6 +230,8 @@ export class SpollyPayments {
   #agente;
   #dormir;
   #aleatorio;
+  #opcoes;
+  #conta = null;
 
   /**
    * @param {string} secretKey a chave secreta (sk_test_... ou sk_live_...)
@@ -192,6 +247,28 @@ export class SpollyPayments {
     // Só para os testes não esperarem de verdade.
     this.#dormir = options._dormir ?? dormir;
     this.#aleatorio = options._aleatorio ?? Math.random;
+    this.#opcoes = options;
+  }
+
+  /**
+   * Um cliente igual a este que age em nome de uma conta ligada da plataforma:
+   * manda `Spolly-Account: <accountId>` em cada pedido (sessões, estornos,
+   * subscrições, `getAccount`). As operações de `/v1/accounts` nunca o mandam,
+   * porque a conta já vai no caminho. Este cliente não muda.
+   * @param {string} accountId o `mer_...` da conta ligada
+   */
+  withAccount(accountId) {
+    if (typeof accountId !== "string" || !/^mer_[0-9A-Za-z]+$/.test(accountId)) {
+      throw new TypeError(`spolly: a conta ligada tem de ser um identificador mer_..., e veio ${JSON.stringify(String(accountId))}`);
+    }
+    const outro = new SpollyPayments(this.#chave, this.#opcoes);
+    outro.#conta = accountId;
+    return outro;
+  }
+
+  /** A conta ligada em nome de quem este cliente age (`withAccount`), ou `null`. */
+  get account() {
+    return this.#conta;
   }
 
   /**
@@ -269,17 +346,144 @@ export class SpollyPayments {
     return this.#pedir("POST", `/v1/subscriptions/${encodeURIComponent(id)}/portal`, undefined, valido.portal, options);
   }
 
+  /**
+   * Cria uma conta ligada, um vendedor da plataforma, no modo da chave (POST
+   * /v1/accounts). Só o `name` é obrigatório.
+   * @param {object} params
+   * @param {{ idempotencyKey?: string, signal?: AbortSignal }} [options]
+   */
+  createAccount(params, options) {
+    return this.#pedir("POST", "/v1/accounts", params, valido.contaLigada, options);
+  }
+
+  /**
+   * Uma página das contas ligadas, da mais recente para a mais antiga (GET
+   * /v1/accounts). A página seguinte pede-se com `starting_after` igual ao `id`
+   * da última, enquanto `has_more` for `true`.
+   * @param {{ limit?: number, starting_after?: string, reference?: string }} [params]
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  listAccounts(params = {}, options) {
+    const q = new URLSearchParams();
+    for (const k of ["limit", "starting_after", "reference"]) {
+      if (params[k] !== undefined && params[k] !== null) q.set(k, String(params[k]));
+    }
+    const texto = q.toString();
+    return this.#pedir("GET", `/v1/accounts${texto ? `?${texto}` : ""}`, undefined, contasLigadas, options);
+  }
+
+  /**
+   * Lê uma conta ligada (GET /v1/accounts/{id}).
+   * @param {string} id
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  getConnectedAccount(id, options) {
+    return this.#pedir("GET", caminhoDaConta(id), undefined, valido.contaLigada, options);
+  }
+
+  /**
+   * Altera uma conta ligada (PATCH /v1/accounts/{id}): só muda o que vier, e
+   * `metadata` substitui os metadados todos.
+   * @param {string} id
+   * @param {object} params
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  updateAccount(id, params, options) {
+    return this.#pedir("PATCH", caminhoDaConta(id), params, valido.contaLigada, options);
+  }
+
+  /**
+   * Entrega um documento da verificação de uma conta ligada (POST
+   * /v1/accounts/{id}/documents, em multipart/form-data): `identity_document`
+   * ou `bank_account_proof`, em PDF, JPEG ou PNG, até 10 MiB.
+   * @param {string} id
+   * @param {{ type: string, file: Blob|Uint8Array|ArrayBuffer, filename?: string }} params
+   * @param {{ idempotencyKey?: string, signal?: AbortSignal }} [options]
+   */
+  uploadAccountDocument(id, params, options) {
+    const { type, file, filename } = params ?? {};
+    let ficheiro;
+    if (file instanceof Blob) ficheiro = file;
+    else if (file instanceof Uint8Array || file instanceof ArrayBuffer) ficheiro = new Blob([file]);
+    else return Promise.reject(new TypeError("spolly: o file tem de ser um Blob, um File, um Uint8Array (Buffer) ou um ArrayBuffer"));
+    if (typeof type !== "string" || type === "") {
+      return Promise.reject(new TypeError("spolly: falta o type do documento (identity_document ou bank_account_proof)"));
+    }
+    const formulario = new FormData();
+    formulario.append("type", type);
+    formulario.append("file", ficheiro, filename || (typeof file.name === "string" && file.name) || "documento");
+    return this.#pedir("POST", `${caminhoDaConta(id)}/documents`, formulario, valido.documento, options);
+  }
+
+  /**
+   * Define a conta bancária dos saques de uma conta ligada (PUT
+   * /v1/accounts/{id}/bank_account), com o comprovativo já entregue.
+   * @param {string} id
+   * @param {{ iban: string, holder: string, holder_tax_id?: string, proof_document: string }} params
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  setAccountBankAccount(id, params, options) {
+    return this.#pedir("PUT", `${caminhoDaConta(id)}/bank_account`, params, valido.contaLigada, options);
+  }
+
+  /**
+   * O saldo de uma conta ligada, por moeda, lido do livro (GET
+   * /v1/accounts/{id}/balance). Os valores vêm em `bigint`, e podem ser
+   * negativos.
+   * @param {string} id
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  getAccountBalance(id, options) {
+    return this.#pedir("GET", `${caminhoDaConta(id)}/balance`, undefined, valido.saldo, options);
+  }
+
+  /**
+   * Pede um saque do disponível de uma conta ligada para a conta bancária
+   * verificada (POST /v1/accounts/{id}/payouts). Mínimo de 5.000 Kz, só em AOA.
+   * @param {string} id
+   * @param {{ amount: bigint|number|string, currency?: "AOA", metadata?: Record<string, string> }} params
+   * @param {{ idempotencyKey?: string, signal?: AbortSignal }} [options]
+   */
+  createAccountPayout(id, params, options) {
+    return this.#pedir("POST", `${caminhoDaConta(id)}/payouts`, params, valido.saque, options);
+  }
+
+  /**
+   * Os saques de uma conta ligada, os 100 mais recentes (GET
+   * /v1/accounts/{id}/payouts).
+   * @param {string} id
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  listAccountPayouts(id, options) {
+    return this.#pedir("GET", `${caminhoDaConta(id)}/payouts`, undefined, saques, options);
+  }
+
+  /**
+   * Lê um saque de uma conta ligada (GET /v1/accounts/{id}/payouts/{payout_id}).
+   * @param {string} id
+   * @param {string} payoutId
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  getAccountPayout(id, payoutId, options) {
+    return this.#pedir("GET", `${caminhoDaConta(id)}/payouts/${encodeURIComponent(payoutId)}`, undefined, valido.saque, options);
+  }
+
   async #pedir(metodo, caminho, corpo, ehValido, options = {}) {
     if (!this.#chave) throw new TypeError("spolly: falta a chave secreta (sk_test_... ou sk_live_...)");
-    const dados = corpo === undefined ? undefined : paraJSON(corpo);
+    // O multipart vai tal como está: o fetch escreve-o, com a fronteira no
+    // Content-Type, em cada tentativa.
+    const multipart = corpo instanceof FormData;
+    const dados = corpo === undefined || multipart ? corpo : paraJSON(corpo);
     const chave = metodo === "POST" ? options.idempotencyKey || randomUUID() : "";
     const cabecalhos = {
       Authorization: `Bearer ${this.#chave}`,
       Accept: "application/json",
       "User-Agent": this.#agente,
     };
-    if (dados !== undefined) cabecalhos["Content-Type"] = "application/json";
+    if (dados !== undefined && !multipart) cabecalhos["Content-Type"] = "application/json";
     if (chave) cabecalhos[IDEMPOTENCY_KEY_HEADER] = chave;
+    // As rotas /v1/accounts são da plataforma, e a API recusa-lhes o cabeçalho.
+    if (this.#conta && !/^\/v1\/accounts(?:[/?]|$)/.test(caminho)) cabecalhos[ACCOUNT_HEADER] = this.#conta;
     const sinal = options.signal;
 
     // Uma tentativa; a seguinte chama-se no fim, com a mesma chave e o mesmo corpo.
