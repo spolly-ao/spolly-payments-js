@@ -419,6 +419,8 @@ test("as subscrições", async () => {
   assert.equal(ErrorCodes.PAID_TO_MERCHANT_ACCOUNT, "pago_na_conta_do_comerciante");
   assert.equal(PaymentMethods.BANK_TRANSFER, "bank_transfer");
   assert.equal(PaymentMethods.DIRECT_DEBIT, "direct_debit");
+  assert.equal(PaymentMethods.PAYPAY, "paypay");
+  assert.equal(PaymentMethods.KWIK, "kwik");
   await c.cancelSubscription("sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0");
   await c.cancelSubscription("sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0", { at_period_end: false }, { idempotencyKey: "cancelar-1" });
   const l = await c.createSubscriptionPortalLink("sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0");

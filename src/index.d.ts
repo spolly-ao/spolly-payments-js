@@ -17,14 +17,26 @@ export type MinorUnits = bigint | number | string;
 
 export type Currency = "AOA" | "USD" | "EUR" | "BRL";
 /**
- * Os métodos de pagamento. `bank_transfer` e `direct_debit` existem só em AOA,
+ * Os métodos de pagamento. `paypay` (a app da PayPay) e `kwik` (o KWiK, pela
+ * PayPay) existem só em AOA. `bank_transfer` e `direct_debit` existem só em AOA,
  * e só se oferecem quando a sessão os pede por nome em `payment_methods`.
  */
-export type PaymentMethod = "mcx" | "reference" | "baipaga" | "card" | "pix" | "bank_transfer" | "direct_debit";
+export type PaymentMethod =
+  | "mcx"
+  | "reference"
+  | "baipaga"
+  | "paypay"
+  | "kwik"
+  | "card"
+  | "pix"
+  | "bank_transfer"
+  | "direct_debit";
 export declare const PaymentMethods: Readonly<{
   MCX: "mcx";
   REFERENCE: "reference";
   BAIPAGA: "baipaga";
+  PAYPAY: "paypay";
+  KWIK: "kwik";
   CARD: "card";
   PIX: "pix";
   BANK_TRANSFER: "bank_transfer";

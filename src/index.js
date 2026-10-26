@@ -48,14 +48,16 @@ const RETRY_AFTER_MAXIMO_MS = 30_000;
 const REPETIVEIS = new Set([429, 500, 502, 503, 504]);
 
 /**
- * Os métodos de pagamento. A transferência bancária e o débito direto existem
- * só em AOA, e só se oferecem quando a sessão os pede por nome em
+ * Os métodos de pagamento. A app da PayPay e o KWiK (pela PayPay) existem só
+ * em AOA. A transferência bancária e o débito direto existem só em AOA, e só se oferecem quando a sessão os pede por nome em
  * `payment_methods`: uma lista vazia não os inclui.
  */
 export const PaymentMethods = Object.freeze({
   MCX: "mcx",
   REFERENCE: "reference",
   BAIPAGA: "baipaga",
+  PAYPAY: "paypay",
+  KWIK: "kwik",
   CARD: "card",
   PIX: "pix",
   BANK_TRANSFER: "bank_transfer",
