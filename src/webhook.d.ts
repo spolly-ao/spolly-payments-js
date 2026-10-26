@@ -27,6 +27,8 @@ export declare class WebhookVerificationError extends Error {
 export type EventType =
   | "checkout.session.expired"
   | "payment.failed"
+  | "payment.held"
+  | "payment.released"
   | "payment.succeeded"
   | "payout.failed"
   | "payout.paid"

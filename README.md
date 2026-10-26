@@ -7,7 +7,7 @@ recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 `src/webhook.d.ts`).
 
 ```bash
-npm install github:spolly-ao/spolly-payments-js#v0.6.0
+npm install github:spolly-ao/spolly-payments-js#v0.7.0
 ```
 
 O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
@@ -135,6 +135,24 @@ const sessao = await hotel.createCheckoutSession({
 // No payment.succeeded, data.object.platform_fee diz o que a plataforma
 // recebeu, e o net é o que fica ao comerciante.
 ```
+
+## Um pagamento em análise
+
+O antifraude da Spolly pode reter um pagamento depois de confirmado: o
+`payment.succeeded` chega na mesma, mas o dinheiro fica no pendente até a
+equipa o libertar. Chegam mais dois eventos, com o mesmo pagamento no objeto:
+
+```js
+if (evento.type === "payment.held") {
+  // Retido: entrega a encomenda se quiseres, mas o dinheiro ainda não sai.
+}
+if (evento.type === "payment.released") {
+  // Libertado: segue para o disponível na libertação seguinte.
+}
+```
+
+Se a equipa confirmar a fraude, o pagamento é estornado ao comprador e chega o
+`refund.created`.
 
 ## O que o cliente faz sozinho
 

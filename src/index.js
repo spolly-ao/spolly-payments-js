@@ -26,7 +26,7 @@ export { parseJSON } from "./json.js";
 export { constructEvent, verifySignature, sign, WebhookVerificationError, Reasons, SIGNATURE_HEADER, EVENT_ID_HEADER, EVENT_TYPE_HEADER, DEFAULT_TOLERANCE_SECONDS } from "./webhook.js";
 
 /** A versão deste SDK, que vai no User-Agent. */
-export const VERSION = "0.6.0";
+export const VERSION = "0.7.0";
 
 /** A API de produção. As chaves sk_test_ também a usam: o modo é o da chave. */
 export const DEFAULT_BASE_URL = "https://payments-api.spolly.ao";
