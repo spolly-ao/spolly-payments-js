@@ -225,7 +225,7 @@ const sessao = await vendedor.createCheckoutSession({
 // 4. O saldo e os saques.
 const saldo = await spolly.getAccountBalance(conta.id);
 // saldo.available, pending e reserved: listas de { amount: bigint, currency }, e podem ser negativos.
-const saque = await spolly.createAccountPayout(conta.id, { amount: 2500000n }); // mínimo 5.000 Kz, só AOA
+const saque = await spolly.createAccountPayout(conta.id, { amount: 2500000n }); // só AOA, e pelo menos o mínimo da conta (5.000 Kz por omissão)
 ```
 
 - `withAccount` devolve um cliente novo, com a mesma chave e a mesma
