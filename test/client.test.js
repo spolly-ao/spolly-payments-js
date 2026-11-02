@@ -220,6 +220,23 @@ test("os 4xx não se repetem, e trazem os campos", async () => {
   assert.equal(e.fields.currency, "Falta a moeda.");
   assert.match(e.idempotencyKey, UUID4);
   assert.equal(e.message, "spolly: 422 dados_invalidos: Há campos por corrigir.; amount: Falta o valor.; currency: Falta a moeda.");
+  assert.equal(e.hint, "");
+  assert.equal(e.docUrl, "");
+});
+
+test("a dica e o doc_url da API ficam no erro e no texto dele", async () => {
+  responder = () => [400, {}, `{"erro":"idempotencia_em_falta","mensagem":"Falta a chave.","dica":"Acrescenta o cabeçalho Idempotency-Key.","doc_url":"https://payments.spolly.ao/docs/erros#idempotencia_em_falta"}`];
+  const e = await cliente().createCheckoutSession({}).catch((e) => e);
+  assert.equal(e.hint, "Acrescenta o cabeçalho Idempotency-Key.");
+  assert.equal(e.docUrl, "https://payments.spolly.ao/docs/erros#idempotencia_em_falta");
+  assert.equal(
+    e.message,
+    "spolly: 400 idempotencia_em_falta: Falta a chave. Dica: Acrescenta o cabeçalho Idempotency-Key. (https://payments.spolly.ao/docs/erros#idempotencia_em_falta)",
+  );
+  responder = () => [404, {}, `{"erro":"sessao_nao_existe","mensagem":"Não existe.","dica":7,"doc_url":"https://payments.spolly.ao/docs/erros#sessao_nao_existe"}`];
+  const so = await cliente().getCheckoutSession("cs_1").catch((e) => e);
+  assert.equal(so.hint, "");
+  assert.equal(so.message, "spolly: 404 sessao_nao_existe: Não existe. (https://payments.spolly.ao/docs/erros#sessao_nao_existe)");
 });
 
 test("um erro ilegível não vira outra coisa", async () => {

@@ -31,7 +31,7 @@ export { parseJSON } from "./json.js";
 export { constructEvent, verifySignature, sign, WebhookVerificationError, Reasons, SIGNATURE_HEADER, EVENT_ID_HEADER, EVENT_TYPE_HEADER, DEFAULT_TOLERANCE_SECONDS } from "./webhook.js";
 
 /** A versão deste SDK, que vai no User-Agent. */
-export const VERSION = "0.9.0";
+export const VERSION = "0.10.0";
 
 /** A API de produção. As chaves sk_test_ também a usam: o modo é o da chave. */
 export const DEFAULT_BASE_URL = "https://payments-api.spolly.ao";
@@ -160,14 +160,18 @@ export const ErrorCodes = Object.freeze({
 /** Uma recusa da API: o estado HTTP, o código estável e a mensagem em português. */
 export class SpollyError extends Error {
   /**
-   * @param {{ status: number, code: string, message: string, fields?: Record<string, string>, idempotencyKey?: string }} d
+   * @param {{ status: number, code: string, message: string, fields?: Record<string, string>, idempotencyKey?: string, hint?: string, docUrl?: string }} d
    */
-  constructor({ status, code, message, fields = {}, idempotencyKey = "" }) {
+  constructor({ status, code, message, fields = {}, idempotencyKey = "", hint = "", docUrl = "" }) {
     const porCampo = Object.keys(fields)
       .sort()
       .map((k) => `; ${k}: ${fields[k]}`)
       .join("");
-    super(`spolly: ${status} ${code}: ${message}${porCampo}`);
+    // A dica e o endereço vão também no texto, para aparecerem no registo e no
+    // terminal, que é onde quem integra (e o assistente dele) os lê.
+    const dica = hint ? ` Dica: ${hint}` : "";
+    const ver = docUrl ? ` (${docUrl})` : "";
+    super(`spolly: ${status} ${code}: ${message}${porCampo}${dica}${ver}`);
     this.name = "SpollyError";
     this.status = status;
     this.code = code;
@@ -175,6 +179,10 @@ export class SpollyError extends Error {
     this.userMessage = message;
     this.fields = fields;
     this.idempotencyKey = idempotencyKey;
+    /** O que mudar no pedido para ele passar, em português. */
+    this.hint = hint;
+    /** O endereço da documentação deste código. */
+    this.docUrl = docUrl;
   }
 }
 
@@ -606,7 +614,15 @@ function lerErro(status, texto, chave) {
       idempotencyKey: chave,
     });
   }
-  return new SpollyError({ status, code: c.erro, message: String(c.mensagem ?? ""), fields: c.campos ?? {}, idempotencyKey: chave });
+  return new SpollyError({
+    status,
+    code: c.erro,
+    message: String(c.mensagem ?? ""),
+    fields: c.campos ?? {},
+    idempotencyKey: chave,
+    hint: typeof c.dica === "string" ? c.dica : "",
+    docUrl: typeof c.doc_url === "string" ? c.doc_url : "",
+  });
 }
 
 /** Uma Idempotency-Key nova, como a que o cliente gera sozinho. */

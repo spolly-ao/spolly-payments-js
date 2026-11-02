@@ -42,7 +42,7 @@ pacote fica com o nome `@spolly-ao/spolly-payments`, que é o que se importa.
 | | `createAccountPayout(id, { amount, currency, metadata }, { idempotencyKey, signal })` | `POST /v1/accounts/{id}/payouts` |
 | | `listAccountPayouts(id, { signal })` | `GET /v1/accounts/{id}/payouts` |
 | | `getAccountPayout(id, payoutId, { signal })` | `GET /v1/accounts/{id}/payouts/{payout_id}` |
-| | `SpollyError` (`status`, `code`, `userMessage`, `fields`, `idempotencyKey`), `ErrorCodes` | As recusas da API |
+| | `SpollyError` (`status`, `code`, `userMessage`, `fields`, `idempotencyKey`, `hint`, `docUrl`; a dica e o endereço vão também no `message`), `ErrorCodes` | As recusas da API |
 | | `SpollyConnectionError`, `SpollyInvalidResponseError` | A API não respondeu; uma resposta que não se lê |
 | | `PaymentMethods` (com `BANK_TRANSFER` e `DIRECT_DEBIT`, só em AOA e só quando pedidos por nome), `Renewals` (`AUTOMATIC`, `NOTICE`: o `renewal` da subscrição), `Settlements` (`BALANCE`, `MERCHANT_ACCOUNT`: o `settlement` de um pagamento; na transferência bancária, o dinheiro entra direto na conta do comerciante, que o confirma no painel, e a taxa sai do saldo dele; uma transferência não se estorna pela API, `PAID_TO_MERCHANT_ACCOUNT`) | Os valores do contrato |
 | | `DocumentTypes` (`IDENTITY_DOCUMENT`, `BANK_ACCOUNT_PROOF`), `ACCOUNT_HEADER` | Os documentos da verificação de uma conta ligada; o nome do cabeçalho |

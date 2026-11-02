@@ -653,6 +653,10 @@ export declare class SpollyError extends Error {
   readonly fields: Record<string, string>;
   /** A chave com que o POST foi feito; repetir com ela é seguro. */
   readonly idempotencyKey: string;
+  /** O que mudar no pedido para ele passar (vazio se a API não o disse). */
+  readonly hint: string;
+  /** O endereço da documentação deste código (vazio se a API não o disse). */
+  readonly docUrl: string;
 }
 
 /** A API não respondeu depois de todas as tentativas. `cause` tem a falha da última. */
