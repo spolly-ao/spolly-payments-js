@@ -147,7 +147,7 @@ const cupao = await spolly.createCoupon({
   code: "BEMVINDO10", percent_off: 10, duration: "repeating", duration_cycles: 3, max_redemptions: 100,
 });
 
-// Aplicado já pela loja (recusa: ErrorCodes.COUPON_INVALID, 422):
+// Aplicado já pelo teu produto (recusa: ErrorCodes.COUPON_INVALID, 422):
 const sessao = await spolly.createCheckoutSession({
   amount: 1500000n, currency: "AOA", description: "Plano mensal", coupon: cupao.code,
 });
