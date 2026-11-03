@@ -74,6 +74,14 @@ export interface CustomerParams {
   name?: string;
   /** Telemóvel angolano; a API guarda-o como 244XXXXXXXXX. */
   phone?: string;
+  /**
+   * O NIF de quem paga, quando o conheces. Vai para o recibo, do lado de quem
+   * pagou, e é o que faz o documento servir à contabilidade de uma empresa que
+   * compra. Dez dígitos numa empresa, ou o número do bilhete de identidade num
+   * empresário em nome individual (nove dígitos, duas letras e três dígitos).
+   * Pontos e hífenes podem ir: a API normaliza. Vazio num particular.
+   */
+  tax_id?: string;
 }
 
 export interface CheckoutSessionParams {
@@ -295,7 +303,7 @@ export interface CheckoutSession {
   success_url: string | null;
   cancel_url: string | null;
   metadata: Record<string, string>;
-  customer: { email: string; name: string; phone: string };
+  customer: { email: string; name: string; phone: string; tax_id: string };
   expires_at: string;
   created_at: string;
   completed_at: string | null;
@@ -375,7 +383,7 @@ export interface Subscription {
   end_reason?: "requested" | "unpaid" | "completed";
   checkout_session_id: string;
   latest_payment_id?: string;
-  customer: { email: string; name: string; phone: string };
+  customer: { email: string; name: string; phone: string; tax_id: string };
   metadata: Record<string, string>;
 }
 

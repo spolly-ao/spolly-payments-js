@@ -26,7 +26,7 @@ import {
 const SESSAO = `{"id":"cs_test_4f8Gk2LmQ9rT1vXz7bN3cH6sW0pY5aDe","object":"checkout_session","mode":"test","status":"complete",
 "url":"https://checkout.payments.spolly.ao/cs_test_4f8Gk2LmQ9rT1vXz7bN3cH6sW0pY5aDe","amount":{"amount":1500000,"currency":"AOA"},
 "description":"Vestido de capulana","line_items":[{"description":"Vestido","unit_amount":1500000,"quantity":1}],"payment_methods":["mcx","card"],
-"success_url":"https://kiala.ao/obrigado","cancel_url":null,"metadata":{"order_id":"1042"},"customer":{"email":"","name":"","phone":""},
+"success_url":"https://kiala.ao/obrigado","cancel_url":null,"metadata":{"order_id":"1042"},"customer":{"email":"","name":"","phone":"","tax_id":""},
 "expires_at":"2026-11-30T10:15:00Z","created_at":"2026-11-29T10:15:00Z","completed_at":"2026-11-29T10:17:12Z",
 "payment":{"id":"pay_9Hq2Lm4Rt8Vx1Zb6Nc3Kd0","status":"succeeded","method":"mcx"}}`;
 const ESTORNO = `{"id":"re_7Tq3Mn5Wx9Yz2Ab4Cd6Ef8","object":"refund","payment_id":"pay_9Hq2Lm4Rt8Vx1Zb6Nc3Kd0",
@@ -416,7 +416,7 @@ test("cancelado entre a resposta e a espera: não espera, nem tenta outra vez", 
 
 const SUBSCRICAO = `{"id":"sub_8Kq2Lm4Rt8Vx1Zb6Nc3Kd0","object":"subscription","status":"active","amount":{"amount":500000,"currency":"AOA"},
 "interval":"month","cycles":null,"cycle":2,"current_period_start":"2026-11-29T10:15:00Z","current_period_end":"2026-12-29T10:15:00Z",
-"method":"mcx","renewal":"notice","cancel_at_period_end":true,"checkout_session_id":"cs_test_1","customer":{"email":"","name":"","phone":""},"metadata":{}}`;
+"method":"mcx","renewal":"notice","cancel_at_period_end":true,"checkout_session_id":"cs_test_1","customer":{"email":"","name":"","phone":"","tax_id":""},"metadata":{}}`;
 
 test("as subscrições", async () => {
   responder = (_, p) =>
