@@ -8,7 +8,7 @@ recente, **sem dependências**, com os tipos para TypeScript (`src/index.d.ts`,
 `src/webhook.d.ts`).
 
 ```bash
-npm install github:spolly-ao/spolly-payments-js#v0.11.0
+npm install github:spolly-ao/spolly-payments-js#v0.12.0
 ```
 
 O repositório é público: instala-se diretamente do GitHub, sem credenciais. O
@@ -42,6 +42,11 @@ pacote fica com o nome `@spolly-ao/spolly-payments`, que é o que se importa.
 | | `createAccountPayout(id, { amount, currency, metadata }, { idempotencyKey, signal })` | `POST /v1/accounts/{id}/payouts` |
 | | `listAccountPayouts(id, { signal })` | `GET /v1/accounts/{id}/payouts` |
 | | `getAccountPayout(id, payoutId, { signal })` | `GET /v1/accounts/{id}/payouts/{payout_id}` |
+| | `createAccountCommission(id, { amount, currency, reference, description, metadata }, { idempotencyKey, signal })` | `POST /v1/accounts/{id}/commissions` |
+| | `listAccountCommissions(id, { limit, starting_after, status }, { signal })` | `GET /v1/accounts/{id}/commissions` |
+| | `getAccountCommission(id, commissionId, { signal })` | `GET /v1/accounts/{id}/commissions/{commission_id}` |
+| | `cancelAccountCommission(id, commissionId, { reason }, { idempotencyKey, signal })` | `POST /v1/accounts/{id}/commissions/{commission_id}/cancel` |
+| | `listCommissions({ limit, starting_after, status, account }, { signal })` | `GET /v1/commissions`, com o resumo da dívida em `summary` |
 | | `SpollyError` (`status`, `code`, `userMessage`, `fields`, `idempotencyKey`, `hint`, `docUrl`; a dica e o endereço vão também no `message`), `ErrorCodes` | As recusas da API |
 | | `SpollyConnectionError`, `SpollyInvalidResponseError` | A API não respondeu; uma resposta que não se lê |
 | | `PaymentMethods` (com `BANK_TRANSFER` e `DIRECT_DEBIT`, só em AOA e só quando pedidos por nome), `Renewals` (`AUTOMATIC`, `NOTICE`: o `renewal` da subscrição), `Settlements` (`BALANCE`, `MERCHANT_ACCOUNT`: o `settlement` de um pagamento; na transferência bancária, o dinheiro entra direto na conta do comerciante, que o confirma no painel, e a taxa sai do saldo dele; uma transferência não se estorna pela API, `PAID_TO_MERCHANT_ACCOUNT`) | Os valores do contrato |
@@ -231,8 +236,8 @@ const saque = await spolly.createAccountPayout(conta.id, { amount: 2500000n }); 
 - `withAccount` devolve um cliente novo, com a mesma chave e a mesma
   configuração; o original continua a ser da plataforma. Serve para as sessões,
   os estornos, as subscrições e o `getAccount`. As operações de `/v1/accounts`
-  nunca mandam o cabeçalho (a API recusa-o nelas), porque a conta vai no
-  caminho.
+  e de `/v1/commissions` nunca mandam o cabeçalho (a API recusa-o nelas),
+  porque a conta vai no caminho.
 - `listAccounts` devolve `{ object: "list", data, has_more }`; a página
   seguinte pede-se com `starting_after` igual ao `id` da última.
 - O documento vai em `multipart/form-data`, com a `Idempotency-Key` como os
@@ -255,6 +260,44 @@ if (evento.account && evento.type === "payout.paid") {
   marcarSaquePago(evento.account, evento.data.object.id);
 }
 ```
+
+## Comissões a contas ligadas
+
+Para as vendas que a plataforma recebe por fora do Spolly Payments, quando quem
+as trouxe é uma conta ligada dela. A equipa do Spolly
+Payments habilita-as (com as contas ligadas ativas) e o dono da conta
+confirma pelo email; sem isso, as operações dão 403
+`ErrorCodes.COMMISSIONS_NOT_ENABLED`.
+
+```js
+// A comissão de uma venda: sai na hora do disponível da plataforma.
+const comissao = await spolly.createAccountCommission(
+  conta.id,
+  { amount: 750000n, reference: "venda_8812", description: "10% da venda 8812" },
+  { idempotencyKey: "venda_8812" },
+);
+// comissao.status: "released" se o disponível a cobria; "pending" se não, e
+// passa à conta ligada quando entrar dinheiro (commission.released).
+
+// A dívida, o que está por libertar e o teto, lidos do livro.
+const { summary } = await spolly.listCommissions({ status: "pending" });
+// summary.available.amount é negativo enquanto a plataforma deve comissões.
+
+// Uma venda devolvida: a comissão pendente cancela-se, e o valor volta.
+await spolly.cancelAccountCommission(conta.id, comissao.id, { reason: "Venda devolvida." });
+```
+
+- Sem saldo, o disponível da plataforma pode ficar negativo até ao teto da
+  dívida (20.000 Kz de partida, ou o que a equipa der à conta): acima dele,
+  `DEBT_LIMIT`, com o valor que ainda cabe na mensagem.
+- As pendentes passam à conta ligada pela ordem em que foram declaradas, cada uma
+  inteira, e não contam no saldo dela: a conta ligada nunca saca dinheiro que a
+  plataforma ainda não tem.
+- Uma venda (`reference`) tem uma comissão só (`COMMISSION_REPEATED`); uma
+  libertada não se cancela (`COMMISSION_ALREADY_RELEASED`).
+- Os eventos `commission.created`, `commission.released` e
+  `commission.canceled` chegam aos webhooks da plataforma, com a conta ligada em
+  `evento.account`.
 
 ## Um pagamento em análise
 

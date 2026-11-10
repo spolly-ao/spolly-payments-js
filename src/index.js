@@ -31,7 +31,7 @@ export { parseJSON } from "./json.js";
 export { constructEvent, verifySignature, sign, WebhookVerificationError, Reasons, SIGNATURE_HEADER, EVENT_ID_HEADER, EVENT_TYPE_HEADER, DEFAULT_TOLERANCE_SECONDS } from "./webhook.js";
 
 /** A versão deste SDK, que vai no User-Agent. */
-export const VERSION = "0.11.0";
+export const VERSION = "0.12.0";
 
 /** A API de produção. As chaves sk_test_ também a usam: o modo é o da chave. */
 export const DEFAULT_BASE_URL = "https://payments-api.spolly.ao";
@@ -121,7 +121,7 @@ export const ErrorCodes = Object.freeze({
   PLATFORM_FEE_INVALID: "comissao_invalida",
   /** A conta da chave não tem as contas ligadas habilitadas (403). */
   CONNECTED_ACCOUNTS_NOT_ENABLED: "contas_ligadas_nao_habilitadas",
-  /** O cabeçalho Spolly-Account numa rota de /v1/accounts, onde a conta vai no caminho (400). */
+  /** O cabeçalho Spolly-Account numa rota de /v1/accounts ou de /v1/commissions, onde a conta vai no caminho ou no parâmetro (400). */
   ACCOUNT_HEADER_NOT_ALLOWED: "spolly_account_nao_serve_aqui",
   /** A conta do Spolly-Account foi criada com uma chave do outro modo (403). */
   ACCOUNT_OTHER_MODE: "conta_de_outro_modo",
@@ -147,6 +147,16 @@ export const ErrorCodes = Object.freeze({
   PAYOUT_REFUSED: "saque_recusado",
   /** O cupão não existe neste comerciante e neste modo (404). */
   COUPON_NOT_FOUND: "cupao_nao_existe",
+  /** A plataforma não tem as comissões a contas ligadas habilitadas pela equipa e confirmadas pelo dono (403). */
+  COMMISSIONS_NOT_ENABLED: "comissoes_nao_habilitadas",
+  /** A comissão não existe nesta conta ligada, neste modo (404). */
+  COMMISSION_NOT_FOUND: "comissao_nao_existe",
+  /** A comissão deixava o disponível da plataforma abaixo do teto da dívida; a mensagem diz quanto cabe (409). */
+  DEBT_LIMIT: "teto_da_divida",
+  /** A venda (`reference`) já tem comissão; a mensagem diz qual (409). */
+  COMMISSION_REPEATED: "comissao_repetida",
+  /** A comissão já não está pendente (passou à conta ligada, ou foi cancelada), e não se cancela (409). */
+  COMMISSION_ALREADY_RELEASED: "comissao_ja_libertada",
   /** Já há um cupão com este código, neste modo (409). */
   COUPON_CODE_TAKEN: "codigo_repetido",
   /** O `coupon` da sessão não existe, está desativado, expirado ou esgotado, é de outra moeda, ou não desconta neste valor (422). */
@@ -228,6 +238,8 @@ const valido = {
     o?.object === "balance" && typeof o.account === "string" && ["available", "pending", "reserved"].every((k) => Array.isArray(o[k]) && o[k].every((d) => typeof d?.amount === "bigint")),
   saque: (o) => typeof o?.id === "string" && o.id.startsWith("po_") && o.object === "payout",
   cupao: (o) => typeof o?.id === "string" && o.id.startsWith("cpn_") && o.object === "coupon",
+  comissao: (o) =>
+    typeof o?.id === "string" && o.id.startsWith("com_") && o.object === "commission" && typeof o.account === "string" && o.account.startsWith("mer_") && typeof o.amount?.amount === "bigint",
 };
 
 // Uma lista da API ({object: "list", data, has_more}), com cada item conferido.
@@ -235,6 +247,22 @@ const lista = (item) => (o) => o?.object === "list" && Array.isArray(o.data) && 
 const contasLigadas = lista(valido.contaLigada);
 const saques = lista(valido.saque);
 const cupoes = lista(valido.cupao);
+const comissoes = lista(valido.comissao);
+// A lista de /v1/commissions traz o resumo da dívida, lido do livro.
+const comissoesComResumo = (o) =>
+  comissoes(o) &&
+  o.summary?.object === "commission_summary" &&
+  ["available", "debt", "pending", "debt_limit"].every((k) => typeof o.summary[k]?.amount === "bigint");
+
+// A consulta das listas das comissões, só com os parâmetros dados.
+const consultaDasComissoes = (params, chaves) => {
+  const q = new URLSearchParams();
+  for (const k of chaves) {
+    if (params[k] !== undefined && params[k] !== null) q.set(k, String(params[k]));
+  }
+  const texto = q.toString();
+  return texto ? `?${texto}` : "";
+};
 
 const caminhoDoCupao = (id) => `/v1/coupons/${encodeURIComponent(id)}`;
 
@@ -535,6 +563,68 @@ export class SpollyPayments {
     return this.#pedir("GET", `${caminhoDaConta(id)}/payouts/${encodeURIComponent(payoutId)}`, undefined, valido.saque, options);
   }
 
+  /**
+   * Declara a comissão de uma conta ligada numa venda que a
+   * plataforma recebeu por fora (POST /v1/accounts/{id}/commissions). O valor
+   * sai na hora do disponível da plataforma, que pode ficar negativo até ao
+   * teto da dívida (acima, `teto_da_divida`), e passa à conta ligada quando o
+   * disponível o cobrir (`released`), na hora ou quando entrar dinheiro, pela
+   * ordem das declarações. Uma venda (`reference`) tem uma comissão só.
+   * @param {string} id
+   * @param {{ amount: bigint|number|string, currency?: "AOA", reference: string, description?: string, metadata?: Record<string, string> }} params
+   * @param {{ idempotencyKey?: string, signal?: AbortSignal }} [options]
+   */
+  createAccountCommission(id, params, options) {
+    return this.#pedir("POST", `${caminhoDaConta(id)}/commissions`, params, valido.comissao, options);
+  }
+
+  /**
+   * Uma página das comissões de uma conta ligada (GET /v1/accounts/{id}/commissions).
+   * @param {string} id
+   * @param {{ limit?: number, starting_after?: string, status?: "pending"|"released"|"canceled" }} [params]
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  listAccountCommissions(id, params = {}, options) {
+    const q = consultaDasComissoes(params, ["limit", "starting_after", "status"]);
+    return this.#pedir("GET", `${caminhoDaConta(id)}/commissions${q}`, undefined, comissoes, options);
+  }
+
+  /**
+   * Lê uma comissão (GET /v1/accounts/{id}/commissions/{commission_id}).
+   * @param {string} id
+   * @param {string} commissionId
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  getAccountCommission(id, commissionId, options) {
+    return this.#pedir("GET", `${caminhoDaConta(id)}/commissions/${encodeURIComponent(commissionId)}`, undefined, valido.comissao, options);
+  }
+
+  /**
+   * Cancela uma comissão pendente (POST
+   * /v1/accounts/{id}/commissions/{commission_id}/cancel): o valor volta ao
+   * disponível da plataforma. Uma libertada já é da conta ligada
+   * (`comissao_ja_libertada`).
+   * @param {string} id
+   * @param {string} commissionId
+   * @param {{ reason?: string }} [params]
+   * @param {{ idempotencyKey?: string, signal?: AbortSignal }} [options]
+   */
+  cancelAccountCommission(id, commissionId, params = {}, options) {
+    return this.#pedir("POST", `${caminhoDaConta(id)}/commissions/${encodeURIComponent(commissionId)}/cancel`, params, valido.comissao, options);
+  }
+
+  /**
+   * As comissões de todas as contas ligadas da plataforma (GET /v1/commissions),
+   * com o resumo da dívida em `summary` (o disponível, a dívida, o que está por
+   * libertar e o teto, em `bigint`).
+   * @param {{ limit?: number, starting_after?: string, status?: "pending"|"released"|"canceled", account?: string }} [params]
+   * @param {{ signal?: AbortSignal }} [options]
+   */
+  listCommissions(params = {}, options) {
+    const q = consultaDasComissoes(params, ["limit", "starting_after", "status", "account"]);
+    return this.#pedir("GET", `/v1/commissions${q}`, undefined, comissoesComResumo, options);
+  }
+
   async #pedir(metodo, caminho, corpo, ehValido, options = {}) {
     if (!this.#chave) throw new TypeError("spolly: falta a chave secreta (sk_test_... ou sk_live_...)");
     // O multipart vai tal como está: o fetch escreve-o, com a fronteira no
@@ -549,8 +639,9 @@ export class SpollyPayments {
     };
     if (dados !== undefined && !multipart) cabecalhos["Content-Type"] = "application/json";
     if (chave) cabecalhos[IDEMPOTENCY_KEY_HEADER] = chave;
-    // As rotas /v1/accounts são da plataforma, e a API recusa-lhes o cabeçalho.
-    if (this.#conta && !/^\/v1\/accounts(?:[/?]|$)/.test(caminho)) cabecalhos[ACCOUNT_HEADER] = this.#conta;
+    // As rotas /v1/accounts e /v1/commissions são da plataforma, e a API
+    // recusa-lhes o cabeçalho.
+    if (this.#conta && !/^\/v1\/(?:accounts|commissions)(?:[/?]|$)/.test(caminho)) cabecalhos[ACCOUNT_HEADER] = this.#conta;
     const sinal = options.signal;
 
     // Uma tentativa; a seguinte chama-se no fim, com a mesma chave e o mesmo corpo.

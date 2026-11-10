@@ -548,6 +548,67 @@ export interface Payout {
   metadata?: Record<string, string>;
 }
 
+export interface CommissionParams {
+  /** Em unidades menores; em AOA, kwanzas inteiros (múltiplo de 100). */
+  amount: MinorUnits;
+  currency?: "AOA";
+  /** A referência da venda do lado da plataforma (1 a 200 carateres): uma venda tem uma comissão só. */
+  reference: string;
+  description?: string;
+  metadata?: Record<string, string>;
+}
+
+export type CommissionStatus = "pending" | "released" | "canceled";
+
+/** A comissão de uma conta ligada numa venda que a plataforma recebeu por fora do Spolly Payments. */
+export interface Commission {
+  id: string;
+  object: "commission";
+  /** A conta ligada. */
+  account: string;
+  amount: Money;
+  /** `pending` (à espera do saldo da plataforma, fora do saldo da conta ligada), `released` (no disponível da conta ligada) ou `canceled`. */
+  status: CommissionStatus;
+  reference: string;
+  description: string;
+  metadata: Record<string, string>;
+  created_at: string;
+  released_at: string | null;
+  canceled_at: string | null;
+  cancellation_reason: string;
+}
+
+export interface ListCommissionsParams {
+  /** De 1 a 100; 20 por omissão. */
+  limit?: number;
+  /** O `id` da última comissão da página anterior. */
+  starting_after?: string;
+  status?: CommissionStatus;
+}
+
+export interface ListAllCommissionsParams extends ListCommissionsParams {
+  /** Só as comissões desta conta ligada. */
+  account?: string;
+}
+
+/** O resumo das comissões da plataforma, lido do livro. */
+export interface CommissionSummary {
+  object: "commission_summary";
+  /** O disponível da plataforma; negativo enquanto deve comissões. */
+  available: SignedMoney;
+  /** O que falta ao disponível para voltar a zero. */
+  debt: Money;
+  /** A soma das comissões por libertar. */
+  pending: Money;
+  pending_count: number;
+  /** O teto da dívida que vale para a plataforma. */
+  debt_limit: Money;
+}
+
+export interface CommissionListWithSummary extends List<Commission> {
+  summary: CommissionSummary;
+}
+
 export interface ClientOptions {
   /** O endereço da API. https://payments-api.spolly.ao por omissão. */
   baseURL?: string;
@@ -587,7 +648,8 @@ export declare class SpollyPayments {
 
   /**
    * Um cliente igual a este que manda `Spolly-Account` em cada pedido, e age em
-   * nome dessa conta ligada. As operações de `/v1/accounts` nunca o mandam.
+   * nome dessa conta ligada. As operações de `/v1/accounts` e de
+   * `/v1/commissions` nunca o mandam.
    */
   withAccount(accountId: string): SpollyPayments;
   /** A conta ligada em nome de quem este cliente age, ou `null`. */
@@ -603,6 +665,11 @@ export declare class SpollyPayments {
   createAccountPayout(id: string, params: PayoutParams, options?: PostOptions): Promise<Payout>;
   listAccountPayouts(id: string, options?: RequestOptions): Promise<List<Payout>>;
   getAccountPayout(id: string, payoutId: string, options?: RequestOptions): Promise<Payout>;
+  createAccountCommission(id: string, params: CommissionParams, options?: PostOptions): Promise<Commission>;
+  listAccountCommissions(id: string, params?: ListCommissionsParams, options?: RequestOptions): Promise<List<Commission>>;
+  getAccountCommission(id: string, commissionId: string, options?: RequestOptions): Promise<Commission>;
+  cancelAccountCommission(id: string, commissionId: string, params?: { reason?: string }, options?: PostOptions): Promise<Commission>;
+  listCommissions(params?: ListAllCommissionsParams, options?: RequestOptions): Promise<CommissionListWithSummary>;
 }
 
 export declare const ErrorCodes: Readonly<{
@@ -641,6 +708,11 @@ export declare const ErrorCodes: Readonly<{
   INSUFFICIENT_BALANCE: "saldo_insuficiente";
   PAYOUT_REFUSED: "saque_recusado";
   COUPON_NOT_FOUND: "cupao_nao_existe";
+  COMMISSIONS_NOT_ENABLED: "comissoes_nao_habilitadas";
+  COMMISSION_NOT_FOUND: "comissao_nao_existe";
+  DEBT_LIMIT: "teto_da_divida";
+  COMMISSION_REPEATED: "comissao_repetida";
+  COMMISSION_ALREADY_RELEASED: "comissao_ja_libertada";
   COUPON_CODE_TAKEN: "codigo_repetido";
   COUPON_INVALID: "cupao_invalido";
   INTERNAL: "erro_interno";

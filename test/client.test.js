@@ -780,3 +780,89 @@ test("os cupões", async () => {
   responder = () => [200, {}, `{"id":"cpn_1","object":"conta"}`];
   await assert.rejects(c.updateCoupon("cpn_1", { name: "x" }), SpollyInvalidResponseError);
 });
+
+const COMISSAO = (estado = "pending") => `{"id":"com_01JA9COMISSAO0000000000","object":"commission","account":"${VENDEDOR}",
+"amount":{"amount":750000,"currency":"AOA"},"status":"${estado}","reference":"venda_8812","description":"10% da venda 8812",
+"metadata":{},"created_at":"2026-11-29T10:15:00Z","released_at":null,"canceled_at":null,"cancellation_reason":""}`;
+const RESUMO = `{"object":"commission_summary","available":{"amount":-750000,"currency":"AOA"},"debt":{"amount":750000,"currency":"AOA"},
+"pending":{"amount":750000,"currency":"AOA"},"pending_count":1,"debt_limit":{"amount":2000000,"currency":"AOA"}}`;
+
+test("as comissões a contas ligadas: declarar, listar, ler, cancelar, e o resumo da dívida em bigint", async () => {
+  responder = (_, p) => {
+    if (p.caminho.startsWith("/v1/commissions")) return [200, {}, `{"object":"list","data":[${COMISSAO()}],"has_more":false,"summary":${RESUMO}}`];
+    if (p.caminho.endsWith("/cancel")) return [200, {}, COMISSAO("canceled")];
+    if (p.metodo === "GET" && /\/commissions(\?|$)/.test(p.caminho)) return [200, {}, `{"object":"list","data":[${COMISSAO("released")}],"has_more":true}`];
+    return [p.metodo === "POST" ? 201 : 200, {}, COMISSAO()];
+  };
+  // Pela cópia com a conta: as rotas das comissões nunca levam o cabeçalho.
+  const c = cliente().withAccount("mer_01JA9OUTRA00000");
+  const k = await c.createAccountCommission(VENDEDOR, { amount: 750000n, reference: "venda_8812", description: "10% da venda 8812" }, { idempotencyKey: "venda_8812" });
+  assert.equal(k.status, "pending");
+  assert.equal(k.amount.amount, 750000n);
+  assert.equal((await c.getAccountCommission(VENDEDOR, "com_01JA9COMISSAO0000000000")).reference, "venda_8812");
+  const pagina = await c.listAccountCommissions(VENDEDOR, { limit: 5, starting_after: "com_x", status: "released", account: "ignorada" });
+  assert.equal(pagina.has_more, true);
+  await c.listAccountCommissions(VENDEDOR);
+  const todas = await c.listCommissions({ account: VENDEDOR, status: null });
+  assert.equal(todas.summary.available.amount, -750000n);
+  assert.equal(todas.summary.debt.amount, 750000n);
+  assert.equal(todas.summary.debt_limit.amount, 2000000n);
+  await c.listCommissions();
+  assert.equal((await c.cancelAccountCommission(VENDEDOR, "com_a/b", { reason: "Devolvida." })).status, "canceled");
+  await c.cancelAccountCommission(VENDEDOR, "com_01JA9COMISSAO0000000000");
+  assert.deepEqual(
+    pedidos.map((p) => [p.metodo, p.caminho, p.corpo]),
+    [
+      ["POST", `/v1/accounts/${VENDEDOR}/commissions`, `{"amount":750000,"reference":"venda_8812","description":"10% da venda 8812"}`],
+      ["GET", `/v1/accounts/${VENDEDOR}/commissions/com_01JA9COMISSAO0000000000`, ""],
+      ["GET", `/v1/accounts/${VENDEDOR}/commissions?limit=5&starting_after=com_x&status=released`, ""],
+      ["GET", `/v1/accounts/${VENDEDOR}/commissions`, ""],
+      ["GET", `/v1/commissions?account=${VENDEDOR}`, ""],
+      ["GET", "/v1/commissions", ""],
+      ["POST", `/v1/accounts/${VENDEDOR}/commissions/com_a%2Fb/cancel`, `{"reason":"Devolvida."}`],
+      ["POST", `/v1/accounts/${VENDEDOR}/commissions/com_01JA9COMISSAO0000000000/cancel`, "{}"],
+    ],
+  );
+  assert.equal(pedidos[0].cab["idempotency-key"], "venda_8812");
+  assert.match(pedidos[7].cab["idempotency-key"], UUID4);
+  for (const p of pedidos) assert.equal(p.cab["spolly-account"], undefined);
+  await assert.rejects(c.createAccountCommission(VENDEDOR, { amount: 7500.5, reference: "v" }), /amount tem de ser um inteiro/);
+
+  for (const [estado, codigo, nome] of [
+    [403, "comissoes_nao_habilitadas", "COMMISSIONS_NOT_ENABLED"],
+    [404, "comissao_nao_existe", "COMMISSION_NOT_FOUND"],
+    [409, "teto_da_divida", "DEBT_LIMIT"],
+    [409, "comissao_repetida", "COMMISSION_REPEATED"],
+    [409, "comissao_ja_libertada", "COMMISSION_ALREADY_RELEASED"],
+  ]) {
+    assert.equal(ErrorCodes[nome], codigo);
+    responder = () => [estado, {}, JSON.stringify({ erro: codigo, mensagem: "recusado" })];
+    await assert.rejects(c.createAccountCommission(VENDEDOR, { amount: 100000, reference: "v" }), (e) => e instanceof SpollyError && e.status === estado && e.code === codigo);
+  }
+});
+
+test("uma comissão, ou uma lista delas, que não se lê nunca é vazia", async () => {
+  const c = cliente();
+  for (const corpo of [
+    "{}",
+    "null",
+    `{"id":"com_1","object":"payout","account":"${VENDEDOR}","amount":{"amount":1}}`,
+    `{"id":"com_1","object":"commission","account":"acct_1","amount":{"amount":1}}`,
+    `{"id":"com_1","object":"commission","account":"${VENDEDOR}","amount":{}}`,
+  ]) {
+    responder = () => [200, {}, corpo];
+    await assert.rejects(c.getAccountCommission(VENDEDOR, "com_1"), SpollyInvalidResponseError);
+    await assert.rejects(c.cancelAccountCommission(VENDEDOR, "com_1"), SpollyInvalidResponseError);
+  }
+  for (const corpo of [
+    `{"object":"list","data":[{"id":"po_1","object":"payout"}],"has_more":false}`,
+    `{"object":"list","data":[],"has_more":false}`,
+    `{"object":"list","data":[],"has_more":false,"summary":{"object":"balance"}}`,
+    `{"object":"list","data":[],"has_more":false,"summary":{"object":"commission_summary","available":{"amount":1},"debt":{"amount":1},"pending":{"amount":1}}}`,
+  ]) {
+    responder = () => [200, {}, corpo];
+    await assert.rejects(c.listCommissions(), SpollyInvalidResponseError);
+  }
+  responder = () => [200, {}, `{"object":"list","data":[{"id":"po_1","object":"payout"}],"has_more":false}`];
+  await assert.rejects(c.listAccountCommissions(VENDEDOR), SpollyInvalidResponseError);
+});
